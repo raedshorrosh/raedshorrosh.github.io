@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مختبر الكيمياء التفاعلي: تشخيص المواد حسب التقرير</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            },
+            options: {
+                processHtmlClass: 'tex2jax_process'
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+        body { font-family: 'Tajawal', sans-serif; background-color: #fcfdfd; color: #1e293b; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin: auto; height: 300px; }
+        .beaker { transition: all 1s ease; position: relative; overflow: hidden; border-top: 2px solid #e2e8f0; }
+        .bubble { position: absolute; bottom: 0; background-color: rgba(255, 255, 255, 0.6); border-radius: 50%; animation: rise 1.5s infinite ease-in; }
+        @keyframes rise { 0% { bottom: 0; opacity: 0; } 50% { opacity: 1; } 100% { bottom: 100%; opacity: 0; } }
+        .fade-in { animation: fadeIn 0.8s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .lab-card { transition: transform 0.3s ease; }
+        .lab-card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col tex2jax_process">
+
+    <header class="bg-slate-900 text-white shadow-xl sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">🧪</span>
+                <h1 class="text-lg font-bold">مختبر الحوامض والقواعد: تشخيص المواد</h1>
+            </div>
+            <div class="text-xs md:text-sm text-slate-400 font-medium hidden md:block">الوحدة التعليمية: تحديد المركبات الأيونية</div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-8 max-w-5xl space-y-12">
+
+        <!-- Introduction Section -->
+        <section id="intro" class="fade-in space-y-6">
+            <div class="bg-gradient-to-r from-indigo-900 to-slate-800 text-white p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+                <div class="relative z-10">
+                    <h2 class="text-3xl font-extrabold mb-4">مقدمة المختبر الافتراضي</h2>
+                    <p class="text-indigo-100 leading-relaxed text-lg max-w-3xl">
+                        مرحباً بك في المختبر الكيميائي الرقمي. في هذه المهمة، سنقوم بمحاكاة تجربة علمية تهدف إلى تشخيص أربع مواد صلبة بيضاء مجهولة ($A, B, C, D$). هذه المواد هي مركبات أيونية سهلة الذوبان في الماء، وعلينا استخدام الأدلة الكيميائية لتحديد هوية كل منها.
+                    </p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+                        <div class="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
+                            <span class="text-yellow-400 text-xl">🎯</span>
+                            <h3 class="font-bold mt-2">الهدف من التجربة</h3>
+                            <p class="text-xs text-indigo-200 mt-1">تصنيف المواد إلى حامضية، قاعدية، أو متعادلة وتحديد صيغتها الكيميائية.</p>
+                        </div>
+                        <div class="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
+                            <span class="text-emerald-400 text-xl">⚗️</span>
+                            <h3 class="font-bold mt-2">الأدوات المستخدمة</h3>
+                            <p class="text-xs text-indigo-200 mt-1">كاشف ماء الملفوف الأحمر، محاليل بتركيز $1M$، وحامض النيتريك $HNO_{3(aq)}$.</p>
+                        </div>
+                        <div class="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
+                            <span class="text-rose-400 text-xl">💡</span>
+                            <h3 class="font-bold mt-2">المبدأ العلمي</h3>
+                            <p class="text-xs text-indigo-200 mt-1">الاعتماد على تغير لون الكاشف حسب سلم الـ $pH$ وتفاعل تحرر الغازات.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30"></div>
+            </div>
+
+            <div class="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-indigo-600 rounded-full"></span>
+                    قائمة المواد المرشحة للتشخيص
+                </h3>
+                <p class="text-sm text-slate-600 mb-4">يجب أن نختار هوية المواد $A, B, C, D$ من بين المركبات التالية:</p>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                        <div class="text-indigo-600 font-bold text-lg mb-1">
+                            $NaCl$
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-medium">كلوريد الصوديوم</div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                        <div class="text-indigo-600 font-bold text-lg mb-1">
+                            $NaOH$
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-medium">هيدروكسيد الصوديوم</div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                        <div class="text-indigo-600 font-bold text-lg mb-1">
+                            $NaHCO_3$
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-medium">بيكربونات الصوديوم</div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                        <div class="text-indigo-600 font-bold text-lg mb-1">
+                            $NaHSO_4$
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-medium">بيكبريتات الصوديوم</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Reference Table -->
+        <section class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 fade-in">
+            <h2 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <span>📊</span> مرجع ألوان كاشف ماء الملفوف
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-center border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50">
+                            <th class="border p-2">pH</th>
+                            <th class="border p-2">0 - 2</th>
+                            <th class="border p-2">4</th>
+                            <th class="border p-2">7</th>
+                            <th class="border p-2">10 - 12</th>
+                            <th class="border p-2">14</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="border p-2 font-bold">اللون</td>
+                            <td class="border p-2 bg-red-500 text-white">أحمر</td>
+                            <td class="border p-2 bg-pink-400 text-white">وردي</td>
+                            <td class="border p-2 bg-purple-600 text-white">بنفسجي</td>
+                            <td class="border p-2 bg-green-500 text-white">أخضر</td>
+                            <td class="border p-2 bg-yellow-400 text-slate-800">أصفر</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Lab Bench -->
+        <section id="lab" class="space-y-8">
+            <div class="bg-white p-8 rounded-2xl shadow-md border border-slate-100">
+                <div class="flex flex-col md:flex-row justify-between gap-4 mb-10">
+                    <div>
+                        <h2 class="text-2xl font-bold text-indigo-900">التجربة 1: اختبار الكاشف</h2>
+                        <p class="text-slate-500">أضف الكاشف للمحاليل عديمة اللون لمطابقة النتائج مع التقرير.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button id="btn-exp1" class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold hover:bg-indigo-700 transition shadow-lg">إضافة الكاشف</button>
+                        <button onclick="location.reload()" class="bg-slate-100 text-slate-500 px-6 py-2 rounded-full font-bold hover:bg-slate-200 transition">إعادة</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+                    <div class="text-center">
+                        <div id="beaker-a" class="beaker h-36 w-24 mx-auto border-x-4 border-b-4 border-slate-200 rounded-b-2xl bg-slate-50/50 flex items-center justify-center shadow-inner">
+                            <span class="text-2xl font-black text-slate-200">A</span>
+                        </div>
+                        <p id="txt-a" class="mt-4 text-xs font-bold text-slate-400">سائل شفاف</p>
+                    </div>
+                    <div class="text-center">
+                        <div id="beaker-b" class="beaker h-36 w-24 mx-auto border-x-4 border-b-4 border-slate-200 rounded-b-2xl bg-slate-50/50 flex items-center justify-center shadow-inner">
+                            <span class="text-2xl font-black text-slate-200">B</span>
+                        </div>
+                        <p id="txt-b" class="mt-4 text-xs font-bold text-slate-400">سائل شفاف</p>
+                    </div>
+                    <div class="text-center">
+                        <div id="beaker-c" class="beaker h-36 w-24 mx-auto border-x-4 border-b-4 border-slate-200 rounded-b-2xl bg-slate-50/50 flex items-center justify-center shadow-inner">
+                            <span class="text-2xl font-black text-slate-200">C</span>
+                        </div>
+                        <p id="txt-c" class="mt-4 text-xs font-bold text-slate-400">سائل شفاف</p>
+                    </div>
+                    <div class="text-center">
+                        <div id="beaker-d" class="beaker h-36 w-24 mx-auto border-x-4 border-b-4 border-slate-200 rounded-b-2xl bg-slate-50/50 flex items-center justify-center shadow-inner">
+                            <span class="text-2xl font-black text-slate-200">D</span>
+                        </div>
+                        <p id="txt-d" class="mt-4 text-xs font-bold text-slate-400">سائل شفاف</p>
+                    </div>
+                </div>
+
+                <div class="border-t pt-8">
+                    <div class="chart-container">
+                        <canvas id="phChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Experiment 2 -->
+            <div id="exp2-area" class="bg-white p-8 rounded-2xl shadow-md border border-rose-100 opacity-50 pointer-events-none transition-all">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-rose-900">التجربة 2: التفاعل مع الحامض</h2>
+                        <p class="text-sm text-rose-700">اختبار انطلاق غاز $CO_2$.</p>
+                    </div>
+                    <button id="btn-exp2" class="bg-rose-600 text-white px-8 py-2 rounded-full font-bold hover:bg-rose-700 transition shadow-md">بدء التفاعل</button>
+                </div>
+                <div class="flex flex-col md:flex-row gap-12 justify-center items-center py-10">
+                    <div class="text-center">
+                        <div id="beaker-b-2" class="beaker h-44 w-32 mx-auto border-x-4 border-b-4 border-slate-300 rounded-b-3xl bg-green-500 flex items-end justify-center relative">
+                            <span class="mb-6 font-bold text-white text-xl opacity-30">B</span>
+                            <div id="bubbles-b" class="absolute inset-0"></div>
+                        </div>
+                        <p class="mt-4 text-sm font-bold text-slate-600">المحلول B + حامض</p>
+                    </div>
+                    <div class="text-center">
+                        <div id="beaker-d-2" class="beaker h-44 w-32 mx-auto border-x-4 border-b-4 border-slate-300 rounded-b-3xl bg-yellow-400 flex items-end justify-center relative">
+                            <span class="mb-6 font-bold text-slate-800 text-xl opacity-30">D</span>
+                        </div>
+                        <p class="mt-4 text-sm font-bold text-slate-600">المحلول D + حامض</p>
+                    </div>
+                </div>
+                <div id="exp2-feedback" class="text-center font-bold text-rose-800 min-h-[1.5rem]"></div>
+            </div>
+        </section>
+
+        <!-- Identification Logic -->
+        <section id="analysis" class="bg-indigo-50 p-8 rounded-3xl border border-indigo-100">
+            <h2 class="text-2xl font-bold text-indigo-900 mb-6 text-center">التشخيص والتحقق</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- A -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-200 lab-card">
+                    <div class="text-xs font-bold text-indigo-400 mb-1">المادة A (بنفسجي)</div>
+                    <select id="sel-a" class="w-full bg-transparent border-b-2 border-slate-200 py-2 focus:border-indigo-500 outline-none text-sm">
+                        <option value="">-- اختر --</option>
+                        <option value="NaCl">NaCl (متعادل)</option>
+                        <option value="NaOH">NaOH (قاعدة قوية)</option>
+                        <option value="NaHCO3">NaHCO3 (قاعدة ضعيفة)</option>
+                        <option value="NaHSO4">NaHSO4 (حامض)</option>
+                    </select>
+                </div>
+                <!-- B -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-200 lab-card">
+                    <div class="text-xs font-bold text-indigo-400 mb-1">المادة B (أخضر + غاز)</div>
+                    <select id="sel-b" class="w-full bg-transparent border-b-2 border-slate-200 py-2 focus:border-indigo-500 outline-none text-sm">
+                        <option value="">-- اختر --</option>
+                        <option value="NaCl">NaCl</option>
+                        <option value="NaOH">NaOH</option>
+                        <option value="NaHCO3">NaHCO3 (كربونات)</option>
+                        <option value="NaHSO4">NaHSO4</option>
+                    </select>
+                </div>
+                <!-- C -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-200 lab-card">
+                    <div class="text-xs font-bold text-indigo-400 mb-1">المادة C (أحمر)</div>
+                    <select id="sel-c" class="w-full bg-transparent border-b-2 border-slate-200 py-2 focus:border-indigo-500 outline-none text-sm">
+                        <option value="">-- اختر --</option>
+                        <option value="NaCl">NaCl</option>
+                        <option value="NaOH">NaOH</option>
+                        <option value="NaHCO3">NaHCO3</option>
+                        <option value="NaHSO4">NaHSO4 (ملح حامضي)</option>
+                    </select>
+                </div>
+                <!-- D -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-200 lab-card">
+                    <div class="text-xs font-bold text-indigo-400 mb-1">المادة D (أصفر)</div>
+                    <select id="sel-d" class="w-full bg-transparent border-b-2 border-slate-200 py-2 focus:border-indigo-500 outline-none text-sm">
+                        <option value="">-- اختر --</option>
+                        <option value="NaCl">NaCl</option>
+                        <option value="NaOH">NaOH (قاعدة قوية جداً)</option>
+                        <option value="NaHCO3">NaHCO3</option>
+                        <option value="NaHSO4">NaHSO4</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-8 flex flex-col items-center gap-4">
+                <button id="btn-check" class="bg-indigo-900 text-white px-12 py-3 rounded-full font-bold hover:bg-indigo-800 transition shadow-xl">تحقق من الإجابات</button>
+                <div id="result-msg" class="text-lg font-bold"></div>
+            </div>
+        </section>
+
+        <!-- MathJax Theories -->
+        <section id="theory" class="bg-slate-900 text-white p-8 md:p-12 rounded-3xl">
+            <h2 class="text-2xl font-bold mb-10 border-b border-slate-700 pb-4 flex items-center gap-3">
+                <span>📓</span> التفسير الكيميائي الدقيق
+            </h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div class="space-y-8">
+                    <div>
+                        <h3 class="text-yellow-400 font-bold mb-3">1. القاعدة القوية (المادة D):</h3>
+                        <p class="text-sm opacity-80 mb-4">هيدروكسيد الصوديوم $NaOH$ يتفكك كلياً، مما يعطي أعلى تركيز لأيونات $OH^-$.</p>
+                        <div class="bg-slate-800 p-4 rounded-xl text-center">
+                            $$NaOH_{(s)} \xrightarrow{H_2O} Na^+_{(aq)} + OH^-_{(aq)}$$
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-green-400 font-bold mb-3">2. القاعدة الضعيفة (المادة B):</h3>
+                        <p class="text-sm opacity-80 mb-4">بيكربونات الصوديوم $NaHCO_3$ ملح قاعدي ناتج عن حامض ضعيف.</p>
+                        <div class="bg-slate-800 p-4 rounded-xl text-center">
+                            $$HCO_{3(aq)}^- + H_2O_{(l)} \rightleftharpoons H_2CO_{3(aq)} + OH^-_{(aq)}$$
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-8">
+                    <div>
+                        <h3 class="text-rose-400 font-bold mb-3">3. تفاعل انطلاق الغاز (المادة B):</h3>
+                        <p class="text-sm opacity-80 mb-4">تحرر الغاز دليل على وجود أيون الكربونات الهيدروجينية.</p>
+                        <div class="bg-slate-800 p-4 rounded-xl text-center">
+                            $$HCO_{3(aq)}^- + H_3O^+_{(aq)} \rightarrow 2H_2O_{(l)} + CO_{2(g)} \uparrow$$
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-red-400 font-bold mb-3">4. الملح الحامضي (المادة C):</h3>
+                        <p class="text-sm opacity-80 mb-4">بيكبريتات الصوديوم $NaHSO_4$ ترفع تركيز الهيدرونيوم.</p>
+                        <div class="bg-slate-800 p-4 rounded-xl text-center">
+                            $$HSO_{4(aq)}^- + H_2O_{(l)} \rightarrow SO_{4(aq)}^{2-} + H_3O^+_{(aq)}$$
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="bg-white border-t py-12 text-center text-slate-400 text-sm">
+        <p>تصميم تعليمي تفاعلي يستند إلى بيانات التقرير الكيميائي 37381-2025</p>
+    </footer>
+
+    <script>
+        const state = { exp1: false, exp2: false, chart: null };
+
+        function initChart() {
+            const ctx = document.getElementById('phChart').getContext('2d');
+            state.chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['A', 'B', 'C', 'D'],
+                    datasets: [{
+                        label: 'قيمة pH',
+                        data: [7, 7, 7, 7],
+                        backgroundColor: '#f1f5f9',
+                        borderRadius: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { min: 0, max: 14 } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        document.getElementById('btn-exp1').addEventListener('click', function() {
+            if(state.exp1) return;
+            state.exp1 = true;
+
+            const results = [
+                { id: 'beaker-a', color: '#7c3aed', txt: 'أزرق - بنفسجي (pH 7)', val: 7, label: 'txt-a' },
+                { id: 'beaker-b', color: '#22c55e', txt: 'أخضر (pH 10-12)', val: 11, label: 'txt-b' },
+                { id: 'beaker-c', color: '#ef4444', txt: 'أحمر (pH 2)', val: 2, label: 'txt-c' },
+                { id: 'beaker-d', color: '#facc15', txt: 'أصفر (pH 14)', val: 14, label: 'txt-d' }
+            ];
+
+            results.forEach(r => {
+                const b = document.getElementById(r.id);
+                b.style.backgroundColor = r.color;
+                b.querySelector('span').style.color = 'white';
+                b.querySelector('span').style.opacity = '0.3';
+                document.getElementById(r.label).textContent = r.txt;
+                document.getElementById(r.label).style.color = r.color;
+            });
+
+            state.chart.data.datasets[0].data = [7, 11, 2, 14];
+            state.chart.data.datasets[0].backgroundColor = ['#7c3aed', '#22c55e', '#ef4444', '#facc15'];
+            state.chart.update();
+
+            document.getElementById('exp2-area').classList.remove('opacity-50', 'pointer-events-none');
+            
+            if (window.MathJax) {
+                MathJax.typeset();
+            }
+        });
+
+        document.getElementById('btn-exp2').addEventListener('click', function() {
+            if(state.exp2) return;
+            state.exp2 = true;
+            this.disabled = true;
+            this.classList.add('opacity-50');
+
+            const fb = document.getElementById('exp2-feedback');
+            fb.textContent = "جاري إضافة $HNO_3$...";
+            MathJax.typesetPromise([fb]);
+
+            setTimeout(() => {
+                const container = document.getElementById('bubbles-b');
+                for(let i=0; i<25; i++) {
+                    const bubble = document.createElement('div');
+                    bubble.className = 'bubble';
+                    bubble.style.left = Math.random() * 80 + 10 + '%';
+                    bubble.style.width = Math.random() * 10 + 5 + 'px';
+                    bubble.style.height = bubble.style.width;
+                    bubble.style.animationDelay = Math.random() * 1.5 + 's';
+                    container.appendChild(bubble);
+                }
+                fb.textContent = "النتيجة: انطلاق غاز $CO_2$ في المادة B فقط. المادة D لم تتفاعل.";
+                MathJax.typesetPromise([fb]);
+            }, 1200);
+        });
+
+        document.getElementById('btn-check').addEventListener('click', function() {
+            const vals = {
+                a: document.getElementById('sel-a').value,
+                b: document.getElementById('sel-b').value,
+                c: document.getElementById('sel-c').value,
+                d: document.getElementById('sel-d').value
+            };
+            const correct = { a: 'NaCl', b: 'NaHCO3', c: 'NaHSO4', d: 'NaOH' };
+            const msg = document.getElementById('result-msg');
+
+            if(vals.a === correct.a && vals.b === correct.b && vals.c === correct.c && vals.d === correct.d) {
+                msg.textContent = "✅ إجابات صحيحة! لقد قمت بتحليل نتائج التقرير بدقة.";
+                msg.className = "text-emerald-600 font-bold mt-4 fade-in text-center";
+            } else {
+                msg.textContent = "❌ هناك خطأ. تذكر: D هي القاعدة الأقوى (أصفر)، و B هي الكربونات التي تطلق الغاز.";
+                msg.className = "text-rose-600 font-bold mt-4 fade-in text-center";
+            }
+        });
+
+        window.onload = function() {
+            initChart();
+            if (window.MathJax) {
+                MathJax.typeset();
+            }
+        };
+    </script>
+</body>
+</html>
