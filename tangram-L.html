@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Tangram V10.0</title>
-   <!-- Raed Shorrosh -->
+  
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
@@ -38,9 +38,9 @@
     const D = S * Math.sqrt(2); 
 
     // --- LAYOUT & CAMERA SETTINGS ---
-    // By decreasing these values, we zoom the camera IN, making pieces larger relative to the board
-    const VIEW_W = 648; 
-    const VIEW_H = 486; 
+    // By increasing these values, we zoom the camera OUT, making pieces smaller relative to the board
+    const VIEW_W = 960; 
+    const VIEW_H = 720; 
 
     // Dynamically place items based on the new camera size
     const SILHOUETTE_TARGET_X = VIEW_W * 0.3;  // Left side
