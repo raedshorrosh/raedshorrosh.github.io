@@ -375,12 +375,12 @@
     const MiniSilhouette = ({ pieces, className = "" }) => {
       if (!pieces || pieces.length === 0) return null;
       
-      // Calculate perfect auto-bounding box for the thumbnail
+      // Calculate perfect auto-bounding box for the thumbnail so it stays large and crisp
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       pieces.forEach(p => {
         const basePiece = SHAPES[p.id];
         if (!basePiece) return;
-        const pts = getSnapPoints({ ...basePiece, ...p });
+        const pts = getVertices({ ...basePiece, ...p });
         pts.forEach(pt => {
           if (pt.x < minX) minX = pt.x;
           if (pt.x > maxX) maxX = pt.x;
@@ -392,7 +392,7 @@
       // Fallback
       if (minX === Infinity) { minX = 0; maxX = 200; minY = 0; maxY = 200; }
 
-      const pad = 20;
+      const pad = 15;
       const vX = minX - pad;
       const vY = minY - pad;
       const vW = (maxX - minX) + pad * 2;
@@ -527,19 +527,19 @@
 
       // Re-calculate the camera and layout targets whenever device orientation/size changes
       const layout = useMemo(() => {
-        // Decreased mobile viewport (500x666) to safely zoom in and make pieces larger on small screens
+        // Taller mobile viewport (500x750) to give vertical breathing room
         const w = isMobile ? 500 : 800;
-        const h = isMobile ? 666 : 600;
+        const h = isMobile ? 750 : 600;
         return {
           VIEW_W: w,
           VIEW_H: h,
           // Desktop: Silhouette on Left, Pieces on Right
           // Mobile: Silhouette on Top, Pieces on Bottom
           SIL_X: isMobile ? w * 0.5 : w * 0.35,
-          SIL_Y: isMobile ? h * 0.35 : h * 0.5,
-          // Desktop top right target: w*0.82, h*0.3
-          INIT_X: isMobile ? w * 0.5 : w * 0.82,
-          INIT_Y: isMobile ? h * 0.76 : h * 0.3, 
+          SIL_Y: isMobile ? h * 0.42 : h * 0.5, // Lowered silhouette on mobile
+          // Desktop target: Center vertically on the right side
+          INIT_X: isMobile ? w * 0.5 : w * 0.80, // Nice margin from right border
+          INIT_Y: isMobile ? h * 0.82 : h * 0.5, // Centered vertically above each other
         };
       }, [isMobile]);
 
@@ -885,7 +885,7 @@
           <div className="flex-1 p-4 md:p-8 flex flex-col items-center justify-center overflow-hidden gap-4">
             
             {/* Responsively swaps between tall stacked aspect ratio on iPhone and side-by-side aspect ratio on iPad/Desktop */}
-            <div className="relative bg-slate-100 rounded-xl shadow-2xl overflow-hidden border-4 border-slate-300 w-full max-w-[500px] md:max-w-[1000px] aspect-[3/4] md:aspect-[4/3] touch-none">
+            <div className="relative bg-slate-100 rounded-xl shadow-2xl overflow-hidden border-4 border-slate-300 w-full max-w-[500px] md:max-w-[1000px] aspect-[2/3] md:aspect-[4/3] touch-none">
               
               <svg ref={svgRef} className="absolute inset-0 w-full h-full" viewBox={`0 0 ${layout.VIEW_W} ${layout.VIEW_H}`} onContextMenu={(e) => e.preventDefault()}>
                 
@@ -1012,7 +1012,7 @@
           )}
           
           {/* Credit Footer */}
-          <div className="w-full text-center pt-2 pb-8 sm:pb-6 text-slate-500 text-xs tracking-wide z-10 relative">
+          <div className="w-full text-center pt-6 pb-12 sm:pb-8 text-slate-500 text-[13px] tracking-wide z-10 relative mt-auto">
             Created by <span className="font-semibold text-slate-400">Raed Shorrosh</span> • <a href="mailto:shorrosh@gmail.com" className="hover:text-teal-400 transition-colors">shorrosh@gmail.com</a>
           </div>
 
