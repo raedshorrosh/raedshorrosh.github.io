@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Tangram V10.0</title>
   
   <!-- Tailwind CSS -->
@@ -17,13 +17,21 @@
 
   <style>
     body { margin: 0; padding: 0; background-color: #1e293b; } /* slate-800 */
+    /* Fixes iPad & iPhone annoyances: prevents text selection and image save popups on touch/long press */
+    svg { 
+      -webkit-touch-callout: none; 
+      -webkit-user-select: none; 
+      user-select: none; 
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useRef, useEffect } = React;
+    const { useState, useRef, useEffect, useMemo } = React;
 
     // --- TANGRAM GEOMETRY ENGINE ---
     const S = 64; 
@@ -140,7 +148,7 @@
       return healed.map(({points, ...p}) => p);
     };
 
-    const autoCenterSilhouette = (pieces, targetX = 225, targetY = 337.5) => {
+    const autoCenterSilhouette = (pieces, targetX, targetY) => {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       
       pieces.forEach(p => {
@@ -163,12 +171,46 @@
       
       return pieces.map(p => ({
         ...p,
-        x: Math.round(p.x + dx),
-        y: Math.round(p.y + dy)
+        x: p.x + dx,
+        y: p.y + dy
       }));
     };
 
-    const parseDatText = (text, targetX = 225, targetY = 337.5) => {
+    // --- NEW HELPERS: Centered Rotation & Bounds Checking ---
+    const getPieceCenter = (piece) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    };
+
+    const keepInBounds = (piece, viewW, viewH) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      
+      let dx = 0, dy = 0;
+      const pad = 10; // 10px breathing room from the exact edge
+      if (minX < pad) dx = pad - minX;
+      else if (maxX > viewW - pad) dx = (viewW - pad) - maxX;
+      
+      if (minY < pad) dy = pad - minY;
+      else if (maxY > viewH - pad) dy = (viewH - pad) - maxY;
+      
+      return { ...piece, x: piece.x + dx, y: piece.y + dy };
+    };
+
+    const parseDatText = (text, targetX, targetY) => {
       try {
         const lines = text.trim().split('\n')
           .map(l => l.trim().split(/\s+/).map(Number))
@@ -223,27 +265,9 @@
       }
     };
 
-    // --- DATA ---
+    // --- STATIC DATA ---
     const initialSetupText = `225 8 1 131 131 131\n227 6 131 1 1 1\n74 75 66 66 66 1\n5 8 1 66 66 66\n6 5 66 66 131 1\n5 75 1 66 66 66\n73 7 1 66 1 131`;
-    const parsedInitial = parseDatText(initialSetupText, 675, 120) || [];
-    const initialPieces = parsedInitial.map(p => ({
-      ...p,
-      color: SHAPES[p.id].color,
-      points: SHAPES[p.id].points
-    }));
 
-    const rawCandleLevelData = [
-      { id: 1, x: 318, y: 404, rotation: 315, flipX: 1 },
-      { id: 2, x: 363, y: 448, rotation: 45, flipX: 1 },
-      { id: 5, x: 363, y: 449, rotation: 135, flipX: 1 },
-      { id: 6, x: 363, y: 359, rotation: 135, flipX: 1 },
-      { id: 3, x: 363, y: 360, rotation: 225, flipX: 1 },
-      { id: 4, x: 394, y: 231, rotation: 90, flipX: 1 },
-      { id: 0, x: 319, y: 91, rotation: 45, flipX: 1 }
-    ];
-    const candleLevelData = autoCenterSilhouette(healSilhouette(rawCandleLevelData), 225, 337.5);
-
-    // All 100 Tangrams precisely as requested
     const levelTexts = {
       level1: `167 262 1 92 93 184\n121 398 92 0 0 92\n166 353 47 46 1 0\n166 263 47 46 1 0\n147 244 66 66 131 1\n179 179 1 66 66 66\n168 40 1 92 47 138`,
       level2: `149 266 130 130 130 0\n148 265 1 1 1 131\n167 110 46 0 0 46\n121 201 47 47 93 1\n149 201 65 0 0 65\n212 156 1 46 47 92\n121 155 92 47 138 1`,
@@ -347,15 +371,35 @@
       level100: `206 155 1 1 1 131\n76 247 131 1 1 1\n114 286 47 46 1 0\n58 137 46 0 0 46\n207 91 65 0 0 65\n84 182 1 66 66 66\n271 156 1 65 1 130`
     };
 
-    const processedLevels = {};
-    Object.keys(levelTexts).forEach(key => {
-      processedLevels[key] = parseDatText(levelTexts[key], 225, 337.5);
-    });
-
+    // Component for rendering pure, auto-centered thumbnails for the menu
     const MiniSilhouette = ({ pieces, className = "" }) => {
       if (!pieces || pieces.length === 0) return null;
+      
+      // Calculate perfect auto-bounding box for the thumbnail so it stays large and crisp
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pieces.forEach(p => {
+        const basePiece = SHAPES[p.id];
+        if (!basePiece) return;
+        const pts = getVertices({ ...basePiece, ...p });
+        pts.forEach(pt => {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = p.y;
+        });
+      });
+
+      // Fallback
+      if (minX === Infinity) { minX = 0; maxX = 200; minY = 0; maxY = 200; }
+
+      const pad = 15;
+      const vX = minX - pad;
+      const vY = minY - pad;
+      const vW = (maxX - minX) + pad * 2;
+      const vH = (maxY - minY) + pad * 2;
+
       return (
-        <svg viewBox="50 100 350 466" className={`pointer-events-none drop-shadow-md ${className}`}>
+        <svg viewBox={`${vX} ${vY} ${vW} ${vH}`} className={`pointer-events-none drop-shadow-md ${className}`}>
           {pieces.map((piece, idx) => {
             const basePiece = SHAPES[piece.id];
             if (!basePiece) return null;
@@ -375,59 +419,33 @@
       );
     };
 
-
-    // --- PURE SHAPE COVERAGE WIN CHECK ENGINE ---
+    // --- NEW: STRICT SHAPE COVERAGE WIN CHECK ENGINE ---
+    // This removes the buggy "translation" logic that allowed false wins
     const checkWinConditionCanvas = (currentPieces, targetPieces) => {
       if (!targetPieces || targetPieces.length === 0) return false;
 
-      const getCentroid = (pts) => {
-        let areaSum = 0, cxSum = 0, cySum = 0;
-        for (let i = 0; i < pts.length; i++) {
-          const j = (i + 1) % pts.length;
-          const factor = pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-          areaSum += factor;
-          cxSum += (pts[i].x + pts[j].x) * factor;
-          cySum += (pts[i].y + pts[j].y) * factor;
-        }
-        if (areaSum === 0) return { x: pts[0].x, y: pts[0].y, area: 0 };
-        return { 
-          x: cxSum / (3 * areaSum), 
-          y: cySum / (3 * areaSum), 
-          area: Math.abs(areaSum / 2) 
-        };
+      // 1. Get exact bounding box for ALL pieces (target AND current)
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      
+      const updateBounds = (piece) => {
+        getVertices(piece).forEach(v => {
+          if (v.x < minX) minX = v.x;
+          if (v.x > maxX) maxX = v.x;
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        });
       };
 
-      const getCenterOfMass = (pieces) => {
-        let totalArea = 0, cx = 0, cy = 0;
-        pieces.forEach(p => {
-          const c = getCentroid(getVertices(p));
-          cx += c.x * c.area;
-          cy += c.y * c.area;
-          totalArea += c.area;
-        });
-        return { x: cx / totalArea, y: cy / totalArea };
-      };
+      targetPieces.forEach(updateBounds);
+      currentPieces.forEach(updateBounds);
 
-      const tCenter = getCenterOfMass(targetPieces);
-      const cCenter = getCenterOfMass(currentPieces);
+      const pad = 20;
+      const w = Math.ceil(maxX - minX + pad * 2);
+      const h = Math.ceil(maxY - minY + pad * 2);
       
-      const dx = tCenter.x - cCenter.x;
-      const dy = tCenter.y - cCenter.y;
+      if (w <= 0 || h <= 0 || w > 4000 || h > 4000) return false;
 
-      let txMin = Infinity, txMax = -Infinity, tyMin = Infinity, tyMax = -Infinity;
-      targetPieces.forEach(p => {
-        getVertices(p).forEach(v => {
-          txMin = Math.min(txMin, v.x); txMax = Math.max(txMax, v.x);
-          tyMin = Math.min(tyMin, v.y); tyMax = Math.max(tyMax, v.y);
-        });
-      });
-
-      const pad = 40;
-      const w = Math.ceil(txMax - txMin) + pad * 2;
-      const h = Math.ceil(tyMax - tyMin) + pad * 2;
-      
-      if (w <= 0 || h <= 0 || w > 3000 || h > 3000) return false;
-
+      // 2. Setup isolated collision canvases
       const canvasA = document.createElement('canvas');
       const canvasB = document.createElement('canvas');
       canvasA.width = w; canvasA.height = h;
@@ -436,8 +454,8 @@
       const ctxA = canvasA.getContext('2d', { willReadFrequently: true });
       const ctxB = canvasB.getContext('2d');
 
-      const drawOffsetX = txMin - pad;
-      const drawOffsetY = tyMin - pad;
+      const drawOffsetX = minX - pad;
+      const drawOffsetY = minY - pad;
 
       const drawPoly = (ctx, vertices) => {
         ctx.beginPath();
@@ -449,15 +467,15 @@
         ctx.fill();
       };
 
+      // 3. Draw Target shape EXACTLY where it is
       ctxA.fillStyle = 'black';
       targetPieces.forEach(p => drawPoly(ctxA, getVertices(p)));
 
+      // 4. Draw Current shape EXACTLY where it is (No shifting to help the user!)
       ctxB.fillStyle = 'black';
-      currentPieces.forEach(p => {
-        const verts = getVertices(p).map(v => ({ x: v.x + dx, y: v.y + dy }));
-        drawPoly(ctxB, verts);
-      });
+      currentPieces.forEach(p => drawPoly(ctxB, getVertices(p)));
 
+      // 5. XOR compares them. If they match perfectly, the canvas is erased blank.
       ctxA.globalCompositeOperation = 'xor';
       ctxA.drawImage(canvasB, 0, 0);
 
@@ -468,99 +486,85 @@
         if (data[i] > 128) errorPixels++;
       }
 
-      return errorPixels < 2000;
+      // STRICT TOLERANCE: Allowed pixels reduced from 2000 to 500. 
+      // This is ~2% of the tangram area. Strictly prevents false wins but allows tiny edge anti-aliasing.
+      return errorPixels < 500;
     };
-
-    // --- GEMINI LLM INTEGRATION ---
-    const generateShapeImage = (piecesToDraw) => {
-      if (!piecesToDraw || piecesToDraw.length === 0) return null;
-      let txMin = Infinity, txMax = -Infinity, tyMin = Infinity, tyMax = -Infinity;
-      piecesToDraw.forEach(p => {
-        getVertices(p).forEach(v => {
-          txMin = Math.min(txMin, v.x); txMax = Math.max(txMax, v.x);
-          tyMin = Math.min(tyMin, v.y); tyMax = Math.max(tyMax, v.y);
-        });
-      });
-
-      const pad = 40;
-      const w = Math.ceil(txMax - txMin) + pad * 2;
-      const h = Math.ceil(tyMax - tyMin) + pad * 2;
-
-      if (w <= 0 || h <= 0 || w > 2000 || h > 2000) return null;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d');
-
-      ctx.fillStyle = 'white';
-      ctx.fillRect(0, 0, w, h);
-
-      const drawOffsetX = txMin - pad;
-      const drawOffsetY = tyMin - pad;
-
-      ctx.fillStyle = 'black';
-      piecesToDraw.forEach(p => {
-        const verts = getVertices(p);
-        ctx.beginPath();
-        ctx.moveTo(verts[0].x - drawOffsetX, verts[0].y - drawOffsetY);
-        for(let i=1; i<verts.length; i++) {
-          ctx.lineTo(verts[i].x - drawOffsetX, verts[i].y - drawOffsetY);
-        }
-        ctx.closePath();
-        ctx.fill();
-      });
-
-      return canvas.toDataURL('image/png').split(',')[1];
-    };
-
-    const fetchGeminiInterpretation = async (base64Image) => {
-      const apiKey = "";
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-      const payload = {
-        contents: [{
-          role: "user",
-          parts: [
-            { text: "Look at this solid black tangram shape. What real-world object, animal, or person does it resemble? Use your imagination. Return a JSON object with 'title' (a short, catchy name for the shape) and 'story' (a whimsical 1-2 sentence description)." },
-            { inlineData: { mimeType: "image/png", data: base64Image } }
-          ]
-        }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              title: { type: "STRING" },
-              story: { type: "STRING" }
-            }
-          }
-        }
-      };
-
-      let delay = 1000;
-      for (let i = 0; i < 5; i++) {
-        try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (!res.ok) throw new Error(`API Error: ${res.status}`);
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!text) throw new Error("No text in response");
-          return JSON.parse(text);
-        } catch (err) {
-          if (i === 4) throw err;
-          await new Promise(r => setTimeout(r, delay));
-          delay *= 2;
-        }
-      }
-    };
-
 
     // --- MAIN APPLICATION ---
     function App() {
+      // Setup dynamic responsive layout state
+      const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+      useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+      }, []);
+
+      // Re-calculate the camera and layout targets whenever device orientation/size changes
+      const layout = useMemo(() => {
+        // Taller mobile viewport (500x750) to give vertical breathing room
+        const w = isMobile ? 500 : 800;
+        const h = isMobile ? 750 : 600;
+        return {
+          VIEW_W: w,
+          VIEW_H: h,
+          // Desktop: Silhouette on Left, Pieces on Right
+          // Mobile: Silhouette on Top, Pieces on Bottom
+          SIL_X: isMobile ? w * 0.5 : w * 0.35,
+          SIL_Y: isMobile ? h * 0.42 : h * 0.5, // Lowered silhouette on mobile
+          // Desktop target: Center vertically on the right side
+          INIT_X: isMobile ? w * 0.5 : w * 0.80, // Nice margin from right border
+          INIT_Y: isMobile ? h * 0.82 : h * 0.5, // Centered vertically above each other
+        };
+      }, [isMobile]);
+
+      // Regenerate level data using the dynamic responsive targets
+      const processedLevels = useMemo(() => {
+        const levels = {};
+        Object.keys(levelTexts).forEach(key => {
+          levels[key] = parseDatText(levelTexts[key], layout.SIL_X, layout.SIL_Y);
+        });
+        return levels;
+      }, [layout]);
+
+      // Regenerate the starting piece positions based on layout
+      const initialPieces = useMemo(() => {
+        let parsedInitial = parseDatText(initialSetupText, 0, 0) || [];
+        
+        // Group 1 (Large Triangles) and Group 2 (Remaining pieces) already form two perfect shapes
+        let group1 = parsedInitial.filter(p => p.id === 1 || p.id === 2);
+        let group2 = parsedInitial.filter(p => p.id !== 1 && p.id !== 2);
+
+        // Center each shape at the origin first
+        group1 = autoCenterSilhouette(group1, 0, 0);
+        group2 = autoCenterSilhouette(group2, 0, 0);
+
+        if (!isMobile) {
+          // Desktop: Stack them perfectly vertically with a clean gap, centered at INIT_Y
+          const gap = 16;
+          const shift = 95; // Prevents overlap since shapes act like diamonds
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y - shift - gap }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y + shift + gap }));
+        } else {
+          // Mobile: Place them side-by-side horizontally so they fit the screen
+          const gap = 8;
+          const shift = 95;
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X - shift - gap, y: p.y + layout.INIT_Y }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X + shift + gap, y: p.y + layout.INIT_Y }));
+        }
+
+        parsedInitial = [...group1, ...group2];
+
+        return parsedInitial.map(p => ({
+          ...p,
+          color: SHAPES[p.id].color,
+          points: SHAPES[p.id].points
+        }));
+      }, [layout, isMobile]);
+
+      // Game State
       const [activeLevel, setActiveLevel] = useState('level1');
       const [mode, setMode] = useState('play'); // play | build
       const [pieces, setPieces] = useState(initialPieces);
@@ -571,19 +575,19 @@
       const [exportData, setExportData] = useState(null);
       const [copySuccess, setCopySuccess] = useState(false);
 
-      // Gemini State
-      const [isInterpreting, setIsInterpreting] = useState(false);
-      const [interpretation, setInterpretation] = useState(null);
-      const [interpretationError, setInterpretationError] = useState(null);
-
       // Drag State
       const [draggingId, setDraggingId] = useState(null);
       const [offset, setOffset] = useState({ x: 0, y: 0 });
       const svgRef = useRef(null);
       
-      // NEW: Trackers to distinguish a "Tap" from a "Drag"
+      // Trackers to distinguish a "Tap" from a "Drag"
       const hasDraggedRef = useRef(false);
       const dragStartPosRef = useRef({ x: 0, y: 0 });
+
+      // Automatically re-center pieces if the user turns their phone/tablet sideways
+      useEffect(() => {
+        setPieces(initialPieces);
+      }, [initialPieces]);
 
       const loadLevel = (level) => {
         setActiveLevel(level);
@@ -600,26 +604,6 @@
           flipX
         }));
         setExportData(JSON.stringify(payload, null, 2));
-      };
-
-      const handleInterpret = async () => {
-        const targetPieces = (mode === 'play' && !hasWon) ? processedLevels[activeLevel] : pieces;
-        if (!targetPieces || targetPieces.length === 0) return;
-
-        setIsInterpreting(true);
-        setInterpretationError(null);
-        try {
-          const base64 = generateShapeImage(targetPieces);
-          if (!base64) throw new Error("Failed to generate image from shapes.");
-          const result = await fetchGeminiInterpretation(base64);
-          setInterpretation(result);
-        } catch (err) {
-          console.error("Interpretation failed", err);
-          setInterpretationError("Oops! The AI couldn't look at the shape right now. Try again later.");
-          setTimeout(() => setInterpretationError(null), 3000);
-        } finally {
-          setIsInterpreting(false);
-        }
       };
 
       const copyToClipboard = () => {
@@ -679,7 +663,16 @@
         if (pieceId !== 0) return;
         setPieces(prev => prev.map(p => {
           if (p.id === pieceId) {
-            return calculateSnap({ ...p, flipX: p.flipX * -1 }, prev, mode === 'play' ? activeSilhouetteData : []);
+            // Spin around visual center instead of origin corner
+            const oldCenter = getPieceCenter(p);
+            let flipped = { ...p, flipX: p.flipX * -1 };
+            const newCenter = getPieceCenter(flipped);
+            flipped.x += (oldCenter.x - newCenter.x);
+            flipped.y += (oldCenter.y - newCenter.y);
+            
+            // Ensure the flip didn't clip outside the canvas
+            flipped = keepInBounds(flipped, layout.VIEW_W, layout.VIEW_H);
+            return calculateSnap(flipped, prev, mode === 'play' ? activeSilhouetteData : []);
           }
           return p;
         }));
@@ -749,11 +742,21 @@
 
               // SMART TAP: If we released without dragging, rotate the piece!
               if (!hasDraggedRef.current) {
-                piece = { ...piece, rotation: (piece.rotation + 45) % 360 };
+                // Spin around visual center instead of origin corner
+                const oldCenter = getPieceCenter(piece);
+                let rotated = { ...piece, rotation: (piece.rotation + 45) % 360 };
+                const newCenter = getPieceCenter(rotated);
+                rotated.x += (oldCenter.x - newCenter.x);
+                rotated.y += (oldCenter.y - newCenter.y);
+                piece = rotated;
               }
 
               // Snap the piece (whether it was dropped or just rotated)
-              const snappedPiece = calculateSnap(piece, prev, mode === 'play' ? activeSilhouetteData : []);
+              let snappedPiece = calculateSnap(piece, prev, mode === 'play' ? activeSilhouetteData : []);
+              
+              // Ensure it never stays outside the screen bounds
+              snappedPiece = keepInBounds(snappedPiece, layout.VIEW_W, layout.VIEW_H);
+              
               return prev.map(p => p.id === draggingId ? snappedPiece : p);
             });
             setDraggingId(null);
@@ -773,26 +776,20 @@
           window.removeEventListener('touchmove', handlePointerMove);
           window.removeEventListener('touchend', handlePointerUp);
         };
-      }, [draggingId, offset, mode, activeSilhouetteData]);
+      }, [draggingId, offset, mode, activeSilhouetteData, layout]);
 
+      // PERFORMANCE FIX: Only calculate the heavy Canvas win check if the user is NOT dragging a piece!
       useEffect(() => {
-        if (mode === 'play' && !hasWon) {
+        if (mode === 'play' && !hasWon && draggingId === null) {
           if (checkWinConditionCanvas(pieces, activeSilhouetteData)) {
             setHasWon(true);
           }
         }
-      }, [pieces, mode, activeSilhouetteData, hasWon]);
+      }, [pieces, mode, activeSilhouetteData, hasWon, draggingId]);
 
       return (
         <div className="min-h-screen bg-slate-800 text-slate-100 flex flex-col font-sans selection:bg-transparent relative">
           
-          {/* Toast Error Notification */}
-          {interpretationError && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-red-900 text-white px-6 py-3 rounded-lg shadow-2xl border border-red-500 font-bold text-sm tracking-wide transition-all animate-in fade-in slide-in-from-top-4">
-              {interpretationError}
-            </div>
-          )}
-
           {/* Top Toolbar */}
           <div className="bg-slate-900 p-4 shadow-lg flex flex-wrap items-center justify-between border-b border-slate-700 gap-4">
             
@@ -806,7 +803,7 @@
                   disabled={mode !== 'play'}
                 >
                   <div className="w-8 h-8 mr-3 bg-slate-700 border border-slate-600 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
-                    <MiniSilhouette pieces={activeSilhouetteData} className="w-full h-full transform scale-[1.5]" />
+                    <MiniSilhouette pieces={activeSilhouetteData} className="w-full h-full p-0.5" />
                   </div>
                   <span className="flex-1 text-left text-sm font-medium truncate">
                     Puzzle {activeLevel.replace('level', '')}
@@ -833,7 +830,7 @@
                             }`}
                           >
                             <div className="flex-1 w-full flex items-center justify-center mb-1 min-h-0">
-                              <MiniSilhouette pieces={processedLevels[levelKey]} className="w-full h-full transform scale-[1.8] pointer-events-none origin-center" />
+                              <MiniSilhouette pieces={processedLevels[levelKey]} className="w-full h-full pointer-events-none p-1" />
                             </div>
                             <span className="w-5 h-5 flex-shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold text-white bg-indigo-500 shadow-md border border-indigo-400/50 relative z-10">
                               {idx + 1}
@@ -848,20 +845,6 @@
             </div>
 
             <div className="flex flex-wrap items-center gap-4">
-              
-              {/* Gemini Feature Button */}
-              <button
-                onClick={handleInterpret}
-                disabled={isInterpreting}
-                className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white px-4 py-1.5 rounded-md text-sm font-bold transition-colors border border-purple-500 shadow-md flex items-center justify-center min-w-[160px]"
-              >
-                {isInterpreting ? (
-                  <span className="flex items-center gap-2 animate-pulse text-purple-200">✨ Looking...</span>
-                ) : (
-                  <span className="flex items-center gap-2 drop-shadow-sm">✨ Interpret Shape</span>
-                )}
-              </button>
-
               <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
                 <button
                   onClick={() => { setMode('play'); setIsMenuOpen(false); }}
@@ -889,10 +872,12 @@
           {/* Main Board Area */}
           <div className="flex-1 p-4 md:p-8 flex flex-col items-center justify-center overflow-hidden gap-4">
             
-            <div className="relative bg-slate-100 rounded-xl shadow-2xl overflow-hidden border-4 border-slate-300 w-full max-w-[900px] aspect-[4/3] touch-none">
-              <svg ref={svgRef} className="absolute inset-0 w-full h-full" viewBox="0 0 900 675" onContextMenu={(e) => e.preventDefault()}>
+            {/* Responsively swaps between tall stacked aspect ratio on iPhone and side-by-side aspect ratio on iPad/Desktop */}
+            <div className="relative bg-slate-100 rounded-xl shadow-2xl overflow-hidden border-4 border-slate-300 w-full max-w-[500px] md:max-w-[1000px] aspect-[2/3] md:aspect-[4/3] touch-none">
+              
+              <svg ref={svgRef} className="absolute inset-0 w-full h-full" viewBox={`0 0 ${layout.VIEW_W} ${layout.VIEW_H}`} onContextMenu={(e) => e.preventDefault()}>
                 
-                {/* Play Mode Solid Background Silhouette - Darker */}
+                {/* Play Mode Solid Background Silhouette */}
                 {mode === 'play' && activeSilhouetteData && activeSilhouetteData.map((piece, idx) => {
                   const basePiece = SHAPES[piece.id];
                   if (!basePiece) return null;
@@ -928,82 +913,53 @@
               
               {mode === 'build' && (
                 <div className="absolute top-4 left-4 right-4 flex justify-between items-center pointer-events-none">
-                  <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-lg border border-slate-200 shadow-sm text-sm text-slate-700 font-medium">
+                  <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-lg border border-slate-200 shadow-sm text-sm text-slate-700 font-medium hidden md:block">
                     <strong>Drag:</strong> 1 Finger/Click | <strong>Rotate:</strong> Quick Tap/Click | <strong>Flip Parallelogram:</strong> Right Click / 2-Finger Tap
                   </div>
                   
                   <button 
                     onClick={handleExportJSON}
-                    className="pointer-events-auto bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm transition-colors flex items-center gap-2"
+                    className="pointer-events-auto bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm transition-colors flex items-center gap-2 ml-auto"
                   >
                     <span>💾 Save Data (JSON)</span>
                   </button>
                 </div>
               )}
+
+              {/* Simplified Win State Overlay - Inside Board, Anchored Bottom-Right */}
+              {hasWon && (
+                <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 pointer-events-auto">
+                  <div className="bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500">
+                    
+                    <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap">
+                      SOLVED!
+                    </h2>
+
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => { setHasWon(false); setPieces(initialPieces); }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold transition-colors shadow-md text-xs md:text-sm whitespace-nowrap"
+                      >
+                        Restart
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const levelKeys = Object.keys(processedLevels);
+                          const currentIndex = levelKeys.indexOf(activeLevel);
+                          const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
+                          loadLevel(nextLevel);
+                        }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold transition-colors shadow-lg text-xs md:text-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
+                      >
+                        Next <span className="text-sm leading-none">&rarr;</span>
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Gemini Interpretation Modal Overlay */}
-          {interpretation && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm">
-              <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-purple-500 max-w-md w-full relative transform animate-in zoom-in duration-300">
-                <button onClick={() => setInterpretation(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-                <div className="text-5xl mb-4 text-center animate-bounce">✨</div>
-                <h2 className="text-3xl font-black text-purple-400 mb-3 text-center drop-shadow-sm">{interpretation.title}</h2>
-                <p className="text-slate-300 text-lg leading-relaxed text-center mb-8 font-medium">
-                  {interpretation.story}
-                </p>
-                <div className="flex justify-center">
-                  <button 
-                    onClick={() => setInterpretation(null)} 
-                    className="bg-purple-600 hover:bg-purple-500 px-8 py-2.5 rounded-full text-white font-bold transition-colors shadow-lg"
-                  >
-                    Awesome!
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Win State Overlay - Floating Compact Pill */}
-          {hasWon && (
-            <div className="absolute bottom-6 md:bottom-10 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
-              <div className="bg-slate-800/95 backdrop-blur-md px-5 py-3 md:px-6 md:py-4 rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center gap-4 md:gap-6 transform animate-in slide-in-from-bottom-8 fade-in duration-500">
-                
-                {/* Title */}
-                <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap hidden sm:block">
-                  PUZZLE SOLVED!
-                </h2>
-                <h2 className="text-lg font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap sm:hidden">
-                  SOLVED!
-                </h2>
-
-                {/* Actions */}
-                <div className="flex gap-2 md:gap-3">
-                  <button 
-                    onClick={() => { setHasWon(false); setPieces(initialPieces); }}
-                    className="px-4 py-2 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold transition-colors shadow-md text-xs md:text-sm whitespace-nowrap"
-                  >
-                    Restart
-                  </button>
-                  <button 
-                    onClick={() => {
-                      const levelKeys = Object.keys(processedLevels);
-                      const currentIndex = levelKeys.indexOf(activeLevel);
-                      const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
-                      loadLevel(nextLevel);
-                    }}
-                    className="px-4 py-2 rounded-full bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold transition-colors shadow-lg text-xs md:text-sm flex items-center gap-2 whitespace-nowrap"
-                  >
-                    Next <span className="text-base leading-none">&rarr;</span>
-                  </button>
-                </div>
-
-              </div>
-            </div>
-          )}
 
           {/* JSON Export Modal Dialog */}
           {exportData && (
@@ -1038,6 +994,11 @@
             </div>
           )}
           
+          {/* Credit Footer */}
+          <div className="w-full text-center pt-6 pb-12 sm:pb-8 text-slate-500 text-[13px] tracking-wide z-10 relative mt-auto">
+            Created by <span className="font-semibold text-slate-400">Raed Shorrosh</span> • <a href="mailto:shorrosh@gmail.com" className="hover:text-teal-400 transition-colors">shorrosh@gmail.com</a>
+          </div>
+
         </div>
       );
     }
@@ -1048,3 +1009,5 @@
   </script>
 </body>
 </html>
+
+
