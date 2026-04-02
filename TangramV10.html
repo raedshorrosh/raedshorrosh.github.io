@@ -171,8 +171,8 @@
       
       return pieces.map(p => ({
         ...p,
-        x: Math.round(p.x + dx),
-        y: Math.round(p.y + dy)
+        x: p.x + dx, // Removed Math.round() so perfect fractional math is preserved!
+        y: p.y + dy  // Removed Math.round() to eliminate corner spikes!
       }));
     };
 
@@ -549,6 +549,10 @@
         Object.keys(levelTexts).forEach(key => {
           levels[key] = parseDatText(levelTexts[key], layout.SIL_X, layout.SIL_Y);
         });
+        
+        // Removed the hacky rawLevel2Data override because removing Math.round() 
+        // allows the engine's built-in healer to fix the DAT text automatically!
+
         return levels;
       }, [layout]);
 
@@ -556,18 +560,29 @@
       const initialPieces = useMemo(() => {
         let parsedInitial = parseDatText(initialSetupText, 0, 0) || [];
         
+        // Group 1 (Large Triangles) and Group 2 (Remaining pieces) already form two perfect shapes
+        let group1 = parsedInitial.filter(p => p.id === 1 || p.id === 2);
+        let group2 = parsedInitial.filter(p => p.id !== 1 && p.id !== 2);
+
+        // Center each shape at the origin first
+        group1 = autoCenterSilhouette(group1, 0, 0);
+        group2 = autoCenterSilhouette(group2, 0, 0);
+
         if (!isMobile) {
-          // Group rotate 90 degrees to stack the squares vertically on desktop
-          parsedInitial = parsedInitial.map(p => ({
-            ...p,
-            x: -p.y,
-            y: p.x,
-            rotation: (p.rotation + 90) % 360
-          }));
+          // Desktop: Stack them perfectly vertically with a clean gap, centered at INIT_Y
+          const gap = 16;
+          const shift = 95; // Prevents overlap since shapes act like diamonds
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y - shift - gap }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y + shift + gap }));
+        } else {
+          // Mobile: Place them side-by-side horizontally so they fit the screen
+          const gap = 8;
+          const shift = 95;
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X - shift - gap, y: p.y + layout.INIT_Y }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X + shift + gap, y: p.y + layout.INIT_Y }));
         }
 
-        // Apply final positioning
-        parsedInitial = autoCenterSilhouette(parsedInitial, layout.INIT_X, layout.INIT_Y);
+        parsedInitial = [...group1, ...group2];
 
         return parsedInitial.map(p => ({
           ...p,
@@ -575,7 +590,6 @@
           points: SHAPES[p.id].points
         }));
       }, [layout, isMobile]);
-
 
       // Game State
       const [activeLevel, setActiveLevel] = useState('level1');
