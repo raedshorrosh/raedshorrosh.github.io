@@ -951,46 +951,41 @@
                   </button>
                 </div>
               )}
+
+              {/* Simplified Win State Overlay - Moved INSIDE the board and anchored to the bottom right */}
+              {hasWon && (
+                <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 pointer-events-auto">
+                  <div className="bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500">
+                    
+                    <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap">
+                      SOLVED!
+                    </h2>
+
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => { setHasWon(false); setPieces(initialPieces); }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold transition-colors shadow-md text-xs md:text-sm whitespace-nowrap"
+                      >
+                        Restart
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const levelKeys = Object.keys(processedLevels);
+                          const currentIndex = levelKeys.indexOf(activeLevel);
+                          const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
+                          loadLevel(nextLevel);
+                        }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold transition-colors shadow-lg text-xs md:text-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
+                      >
+                        Next <span className="text-sm leading-none">&rarr;</span>
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Win State Overlay - Floating Compact Pill */}
-          {hasWon && (
-            <div className="absolute bottom-16 md:bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
-              <div className="bg-slate-800/95 backdrop-blur-md px-5 py-3 md:px-6 md:py-4 rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center gap-4 md:gap-6 transform animate-in slide-in-from-bottom-8 fade-in duration-500">
-                
-                {/* Title */}
-                <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap hidden sm:block">
-                  PUZZLE SOLVED!
-                </h2>
-                <h2 className="text-lg font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap sm:hidden">
-                  SOLVED!
-                </h2>
-
-                {/* Actions */}
-                <div className="flex gap-2 md:gap-3">
-                  <button 
-                    onClick={() => { setHasWon(false); setPieces(initialPieces); }}
-                    className="px-4 py-2 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold transition-colors shadow-md text-xs md:text-sm whitespace-nowrap"
-                  >
-                    Restart
-                  </button>
-                  <button 
-                    onClick={() => {
-                      const levelKeys = Object.keys(processedLevels);
-                      const currentIndex = levelKeys.indexOf(activeLevel);
-                      const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
-                      loadLevel(nextLevel);
-                    }}
-                    className="px-4 py-2 rounded-full bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold transition-colors shadow-lg text-xs md:text-sm flex items-center gap-2 whitespace-nowrap"
-                  >
-                    Next <span className="text-base leading-none">&rarr;</span>
-                  </button>
-                </div>
-
-              </div>
-            </div>
-          )}
 
           {/* JSON Export Modal Dialog */}
           {exportData && (
