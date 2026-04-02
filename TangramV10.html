@@ -527,17 +527,19 @@
 
       // Re-calculate the camera and layout targets whenever device orientation/size changes
       const layout = useMemo(() => {
-        const w = isMobile ? 600 : 800;
-        const h = isMobile ? 800 : 600;
+        // Decreased mobile viewport (500x666) to safely zoom in and make pieces larger on small screens
+        const w = isMobile ? 500 : 800;
+        const h = isMobile ? 666 : 600;
         return {
           VIEW_W: w,
           VIEW_H: h,
           // Desktop: Silhouette on Left, Pieces on Right
           // Mobile: Silhouette on Top, Pieces on Bottom
           SIL_X: isMobile ? w * 0.5 : w * 0.35,
-          SIL_Y: isMobile ? h * 0.35 : h * 0.5, // Lowered from 0.28 to 0.35 to add top margin
-          INIT_X: isMobile ? w * 0.5 : w * 0.75,
-          INIT_Y: isMobile ? h * 0.76 : h * 0.5, // Pushed slightly further down on mobile
+          SIL_Y: isMobile ? h * 0.35 : h * 0.5,
+          // Desktop top right target: w*0.82, h*0.3
+          INIT_X: isMobile ? w * 0.5 : w * 0.82,
+          INIT_Y: isMobile ? h * 0.76 : h * 0.3, 
         };
       }, [isMobile]);
 
@@ -552,13 +554,27 @@
 
       // Regenerate the starting piece positions based on layout
       const initialPieces = useMemo(() => {
-        const parsedInitial = parseDatText(initialSetupText, layout.INIT_X, layout.INIT_Y) || [];
+        let parsedInitial = parseDatText(initialSetupText, 0, 0) || [];
+        
+        if (!isMobile) {
+          // Group rotate 90 degrees to stack the squares vertically on desktop
+          parsedInitial = parsedInitial.map(p => ({
+            ...p,
+            x: -p.y,
+            y: p.x,
+            rotation: (p.rotation + 90) % 360
+          }));
+        }
+
+        // Apply final positioning
+        parsedInitial = autoCenterSilhouette(parsedInitial, layout.INIT_X, layout.INIT_Y);
+
         return parsedInitial.map(p => ({
           ...p,
           color: SHAPES[p.id].color,
           points: SHAPES[p.id].points
         }));
-      }, [layout]);
+      }, [layout, isMobile]);
 
 
       // Game State
