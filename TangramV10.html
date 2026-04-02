@@ -176,6 +176,40 @@
       }));
     };
 
+    // --- NEW HELPERS: Centered Rotation & Bounds Checking ---
+    const getPieceCenter = (piece) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    };
+
+    const keepInBounds = (piece, viewW, viewH) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      
+      let dx = 0, dy = 0;
+      const pad = 10; // 10px breathing room from the exact edge
+      if (minX < pad) dx = pad - minX;
+      else if (maxX > viewW - pad) dx = (viewW - pad) - maxX;
+      
+      if (minY < pad) dy = pad - minY;
+      else if (maxY > viewH - pad) dy = (viewH - pad) - maxY;
+      
+      return { ...piece, x: piece.x + dx, y: piece.y + dy };
+    };
+
     const parseDatText = (text, targetX, targetY) => {
       try {
         const lines = text.trim().split('\n')
@@ -501,9 +535,9 @@
           // Desktop: Silhouette on Left, Pieces on Right
           // Mobile: Silhouette on Top, Pieces on Bottom
           SIL_X: isMobile ? w * 0.5 : w * 0.35,
-          SIL_Y: isMobile ? h * 0.28 : h * 0.5,
+          SIL_Y: isMobile ? h * 0.35 : h * 0.5, // Lowered from 0.28 to 0.35 to add top margin
           INIT_X: isMobile ? w * 0.5 : w * 0.75,
-          INIT_Y: isMobile ? h * 0.72 : h * 0.5,
+          INIT_Y: isMobile ? h * 0.76 : h * 0.5, // Pushed slightly further down on mobile
         };
       }, [isMobile]);
 
@@ -626,7 +660,16 @@
         if (pieceId !== 0) return;
         setPieces(prev => prev.map(p => {
           if (p.id === pieceId) {
-            return calculateSnap({ ...p, flipX: p.flipX * -1 }, prev, mode === 'play' ? activeSilhouetteData : []);
+            // Spin around visual center instead of origin corner
+            const oldCenter = getPieceCenter(p);
+            let flipped = { ...p, flipX: p.flipX * -1 };
+            const newCenter = getPieceCenter(flipped);
+            flipped.x += (oldCenter.x - newCenter.x);
+            flipped.y += (oldCenter.y - newCenter.y);
+            
+            // Ensure the flip didn't clip outside the canvas
+            flipped = keepInBounds(flipped, layout.VIEW_W, layout.VIEW_H);
+            return calculateSnap(flipped, prev, mode === 'play' ? activeSilhouetteData : []);
           }
           return p;
         }));
@@ -696,11 +739,21 @@
 
               // SMART TAP: If we released without dragging, rotate the piece!
               if (!hasDraggedRef.current) {
-                piece = { ...piece, rotation: (piece.rotation + 45) % 360 };
+                // Spin around visual center instead of origin corner
+                const oldCenter = getPieceCenter(piece);
+                let rotated = { ...piece, rotation: (piece.rotation + 45) % 360 };
+                const newCenter = getPieceCenter(rotated);
+                rotated.x += (oldCenter.x - newCenter.x);
+                rotated.y += (oldCenter.y - newCenter.y);
+                piece = rotated;
               }
 
               // Snap the piece (whether it was dropped or just rotated)
-              const snappedPiece = calculateSnap(piece, prev, mode === 'play' ? activeSilhouetteData : []);
+              let snappedPiece = calculateSnap(piece, prev, mode === 'play' ? activeSilhouetteData : []);
+              
+              // Ensure it never stays outside the screen bounds
+              snappedPiece = keepInBounds(snappedPiece, layout.VIEW_W, layout.VIEW_H);
+              
               return prev.map(p => p.id === draggingId ? snappedPiece : p);
             });
             setDraggingId(null);
