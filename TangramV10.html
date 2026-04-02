@@ -39,7 +39,7 @@
 
     // Base definitions for all shapes
     const SHAPES = {
-      0: { id: 0, color: '#ec4899', points: `0,0 ${S},0 ${S*2},${S} ${S},${S}` }, // Bright pink parallelogram
+      0: { id: 0, color: '#ec4899', points: `0,0 ${S},0 ${S*2},${S} ${S},${S}` }, // Changed to bright pink
       1: { id: 1, color: '#3498db', points: `0,0 ${S*2},0 0,${S*2}` },
       2: { id: 2, color: '#9b59b6', points: `0,0 ${S*2},0 0,${S*2}` },
       3: { id: 3, color: '#1abc9c', points: `0,0 ${D},0 0,${D}` },
@@ -171,8 +171,8 @@
       
       return pieces.map(p => ({
         ...p,
-        x: p.x + dx, // Removed Math.round() so perfect fractional math is preserved!
-        y: p.y + dy  // Removed Math.round() to eliminate corner spikes!
+        x: p.x + dx,
+        y: p.y + dy
       }));
     };
 
@@ -385,7 +385,7 @@
           if (pt.x < minX) minX = pt.x;
           if (pt.x > maxX) maxX = pt.x;
           if (pt.y < minY) minY = pt.y;
-          if (pt.y > maxY) maxY = pt.y;
+          if (pt.y > maxY) maxY = p.y;
         });
       });
 
@@ -419,58 +419,33 @@
       );
     };
 
-    // --- PURE SHAPE COVERAGE WIN CHECK ENGINE ---
+    // --- NEW: STRICT SHAPE COVERAGE WIN CHECK ENGINE ---
+    // This removes the buggy "translation" logic that allowed false wins
     const checkWinConditionCanvas = (currentPieces, targetPieces) => {
       if (!targetPieces || targetPieces.length === 0) return false;
 
-      const getCentroid = (pts) => {
-        let areaSum = 0, cxSum = 0, cySum = 0;
-        for (let i = 0; i < pts.length; i++) {
-          const j = (i + 1) % pts.length;
-          const factor = pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-          areaSum += factor;
-          cxSum += (pts[i].x + pts[j].x) * factor;
-          cySum += (pts[i].y + pts[j].y) * factor;
-        }
-        if (areaSum === 0) return { x: pts[0].x, y: pts[0].y, area: 0 };
-        return { 
-          x: cxSum / (3 * areaSum), 
-          y: cySum / (3 * areaSum), 
-          area: Math.abs(areaSum / 2) 
-        };
+      // 1. Get exact bounding box for ALL pieces (target AND current)
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      
+      const updateBounds = (piece) => {
+        getVertices(piece).forEach(v => {
+          if (v.x < minX) minX = v.x;
+          if (v.x > maxX) maxX = v.x;
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        });
       };
 
-      const getCenterOfMass = (pieces) => {
-        let totalArea = 0, cx = 0, cy = 0;
-        pieces.forEach(p => {
-          const c = getCentroid(getVertices(p));
-          cx += c.x * c.area;
-          cy += c.y * c.area;
-          totalArea += c.area;
-        });
-        return { x: cx / totalArea, y: cy / totalArea };
-      };
+      targetPieces.forEach(updateBounds);
+      currentPieces.forEach(updateBounds);
 
-      const tCenter = getCenterOfMass(targetPieces);
-      const cCenter = getCenterOfMass(currentPieces);
+      const pad = 20;
+      const w = Math.ceil(maxX - minX + pad * 2);
+      const h = Math.ceil(maxY - minY + pad * 2);
       
-      const dx = tCenter.x - cCenter.x;
-      const dy = tCenter.y - cCenter.y;
+      if (w <= 0 || h <= 0 || w > 4000 || h > 4000) return false;
 
-      let txMin = Infinity, txMax = -Infinity, tyMin = Infinity, tyMax = -Infinity;
-      targetPieces.forEach(p => {
-        getVertices(p).forEach(v => {
-          txMin = Math.min(txMin, v.x); txMax = Math.max(txMax, v.x);
-          tyMin = Math.min(tyMin, v.y); tyMax = Math.max(tyMax, v.y);
-        });
-      });
-
-      const pad = 40;
-      const w = Math.ceil(txMax - txMin) + pad * 2;
-      const h = Math.ceil(tyMax - tyMin) + pad * 2;
-      
-      if (w <= 0 || h <= 0 || w > 3000 || h > 3000) return false;
-
+      // 2. Setup isolated collision canvases
       const canvasA = document.createElement('canvas');
       const canvasB = document.createElement('canvas');
       canvasA.width = w; canvasA.height = h;
@@ -479,8 +454,8 @@
       const ctxA = canvasA.getContext('2d', { willReadFrequently: true });
       const ctxB = canvasB.getContext('2d');
 
-      const drawOffsetX = txMin - pad;
-      const drawOffsetY = tyMin - pad;
+      const drawOffsetX = minX - pad;
+      const drawOffsetY = minY - pad;
 
       const drawPoly = (ctx, vertices) => {
         ctx.beginPath();
@@ -492,15 +467,15 @@
         ctx.fill();
       };
 
+      // 3. Draw Target shape EXACTLY where it is
       ctxA.fillStyle = 'black';
       targetPieces.forEach(p => drawPoly(ctxA, getVertices(p)));
 
+      // 4. Draw Current shape EXACTLY where it is (No shifting to help the user!)
       ctxB.fillStyle = 'black';
-      currentPieces.forEach(p => {
-        const verts = getVertices(p).map(v => ({ x: v.x + dx, y: v.y + dy }));
-        drawPoly(ctxB, verts);
-      });
+      currentPieces.forEach(p => drawPoly(ctxB, getVertices(p)));
 
+      // 5. XOR compares them. If they match perfectly, the canvas is erased blank.
       ctxA.globalCompositeOperation = 'xor';
       ctxA.drawImage(canvasB, 0, 0);
 
@@ -511,7 +486,9 @@
         if (data[i] > 128) errorPixels++;
       }
 
-      return errorPixels < 2000;
+      // STRICT TOLERANCE: Allowed pixels reduced from 2000 to 500. 
+      // This is ~2% of the tangram area. Strictly prevents false wins but allows tiny edge anti-aliasing.
+      return errorPixels < 500;
     };
 
     // --- MAIN APPLICATION ---
@@ -549,10 +526,6 @@
         Object.keys(levelTexts).forEach(key => {
           levels[key] = parseDatText(levelTexts[key], layout.SIL_X, layout.SIL_Y);
         });
-        
-        // Removed the hacky rawLevel2Data override because removing Math.round() 
-        // allows the engine's built-in healer to fix the DAT text automatically!
-
         return levels;
       }, [layout]);
 
@@ -803,15 +776,16 @@
           window.removeEventListener('touchmove', handlePointerMove);
           window.removeEventListener('touchend', handlePointerUp);
         };
-      }, [draggingId, offset, mode, activeSilhouetteData]);
+      }, [draggingId, offset, mode, activeSilhouetteData, layout]);
 
+      // PERFORMANCE FIX: Only calculate the heavy Canvas win check if the user is NOT dragging a piece!
       useEffect(() => {
-        if (mode === 'play' && !hasWon) {
+        if (mode === 'play' && !hasWon && draggingId === null) {
           if (checkWinConditionCanvas(pieces, activeSilhouetteData)) {
             setHasWon(true);
           }
         }
-      }, [pieces, mode, activeSilhouetteData, hasWon]);
+      }, [pieces, mode, activeSilhouetteData, hasWon, draggingId]);
 
       return (
         <div className="min-h-screen bg-slate-800 text-slate-100 flex flex-col font-sans selection:bg-transparent relative">
@@ -952,7 +926,7 @@
                 </div>
               )}
 
-              {/* Simplified Win State Overlay - Moved INSIDE the board and anchored to the bottom right */}
+              {/* Simplified Win State Overlay - Inside Board, Anchored Bottom-Right */}
               {hasWon && (
                 <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 pointer-events-auto">
                   <div className="bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500">
@@ -1035,3 +1009,5 @@
   </script>
 </body>
 </html>
+
+
