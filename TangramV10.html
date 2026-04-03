@@ -8,6 +8,9 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
+  <!-- Canvas Confetti for Fireworks -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  
   <!-- React and ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -828,6 +831,35 @@
           window.removeEventListener('touchend', handlePointerUp); // FIXED TYPO: This was incorrectly 'touchmove', causing the massive listener leak!
         };
       }, [draggingId, offset, mode, activeSilhouetteData, layout]);
+
+      // --- NEW: Celebration Fireworks ---
+      useEffect(() => {
+        let interval;
+        
+        if (hasWon && mode === 'play' && window.confetti) {
+          const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
+
+          function randomInRange(min, max) {
+            return Math.random() * (max - min) + min;
+          }
+
+          // Run continuously every 300ms
+          interval = setInterval(function() {
+            window.confetti({
+              ...defaults, 
+              particleCount: 40, // Fixed amount per burst
+              origin: { x: randomInRange(0.1, 0.9), y: Math.random() - 0.2 }
+            });
+          }, 300); 
+        }
+        
+        // Cleanup function: stops the fireworks when hasWon becomes false
+        return () => {
+          if (interval) {
+            clearInterval(interval);
+          }
+        };
+      }, [hasWon, mode]);
 
       useEffect(() => {
         if (mode === 'play' && !hasWon && draggingId === null) {
