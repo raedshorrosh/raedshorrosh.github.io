@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TANGRAM V10.5 by Raed Shorrosh</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Canvas Confetti for Fireworks -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  
+  <!-- React and ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel for parsing JSX in the browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body { margin: 0; padding: 0; background-color: #1e293b; } /* slate-800 */
+    /* Fixes iPad & iPhone annoyances: prevents text selection and image save popups on touch/long press */
+    svg { 
+      -webkit-touch-callout: none; 
+      -webkit-user-select: none; 
+      user-select: none; 
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- INITIALIZE FIREBASE CLOUD DATABASE ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAbfXsx2r49ncJwlFdtQ0KsGHUdELNp0aU",
+      authDomain: "tangram-20969.firebaseapp.com",
+      projectId: "tangram-20969",
+      storageBucket: "tangram-20969.firebasestorage.app",
+      messagingSenderId: "970184646189",
+      appId: "1:970184646189:web:565c7a4058077d5f0c22a4",
+      measurementId: "G-6W54Q6QDJS"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    
+    // Give your game a clean custom ID for your database folders
+    const appId = 'tangram-game-v10';
+
+    const { useState, useRef, useEffect, useMemo } = React;
+
+    // --- TANGRAM GEOMETRY ENGINE ---
+    const S = 64; 
+    const D = S * Math.sqrt(2); 
+
+    // Base definitions for all shapes
+    const SHAPES = {
+      0: { id: 0, color: '#ec4899', points: `0,0 ${S},0 ${S*2},${S} ${S},${S}` }, // Changed to bright pink
+      1: { id: 1, color: '#3498db', points: `0,0 ${S*2},0 0,${S*2}` },
+      2: { id: 2, color: '#9b59b6', points: `0,0 ${S*2},0 0,${S*2}` },
+      3: { id: 3, color: '#1abc9c', points: `0,0 ${D},0 0,${D}` },
+      4: { id: 4, color: '#e67e22', points: `0,0 ${S},0 ${S},${S} 0,${S}` },
+      5: { id: 5, color: '#f1c40f', points: `0,0 ${S},0 0,${S}` },
+      6: { id: 6, color: '#2ecc71', points: `0,0 ${S},0 0,${S}` },
+    };
+
+    // Calculates true vertex coordinates given translation, rotation, and flip
+    const getVertices = (piece) => {
+      const basePiece = SHAPES[piece.id];
+      const basePts = basePiece.points.split(' ').map(p => {
+        const [x, y] = p.split(',');
+        return { x: parseFloat(x), y: parseFloat(y) };
+      });
+      const angle = piece.rotation * Math.PI / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      return basePts.map(pt => {
+        const fx = pt.x * piece.flipX;
+        const fy = pt.y;
+        const rx = fx * cos - fy * sin;
+        const ry = fx * sin + fy * cos;
+        return { x: piece.x + rx, y: piece.y + ry };
+      });
+    };
+
+    // --- MAGNET LOGIC & MATH ---
+    const getSnapPoints = (piece) => {
+      const pointsStr = piece.points || SHAPES[piece.id]?.points;
+      if (!pointsStr) return [];
+
+      const basePts = pointsStr.split(' ').map(p => {
+        const [x, y] = p.split(',');
+        return { x: parseFloat(x), y: parseFloat(y) };
+      });
+      
+      const allPts = [];
+      for (let i = 0; i < basePts.length; i++) {
+        const curr = basePts[i];
+        const next = basePts[(i + 1) % basePts.length];
+        
+        // 3 POINTS ALIGNMENT: Start, Middle, and End (End is covered by the next edge's Start)
+        // This divides the edge exactly in half, preserving pure Tangram math!
+        for (let j = 0; j < 2; j++) {
+          allPts.push({ 
+            x: curr.x + (next.x - curr.x) * (j / 2), 
+            y: curr.y + (next.y - curr.y) * (j / 2) 
+          });
+        }
+      }
+
+      const angle = piece.rotation * Math.PI / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+
+      return allPts.map(pt => {
+        const fx = pt.x * piece.flipX;
+        const fy = pt.y;
+        const rx = fx * cos - fy * sin;
+        const ry = fx * sin + fy * cos;
+        return { x: piece.x + rx, y: piece.y + ry };
+      });
+    };
+
+    const healSilhouette = (pieces) => {
+      if (!pieces || pieces.length === 0) return pieces;
+      
+      const fullPieces = pieces.map(p => ({
+        ...p,
+        points: p.points || SHAPES[p.id]?.points
+      }));
+
+      const healed = [fullPieces[0]];
+      const unanchored = fullPieces.slice(1);
+      
+      while(unanchored.length > 0) {
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        let bestSnapDx = 0;
+        let bestSnapDy = 0;
+        
+        unanchored.forEach((testPiece, idx) => {
+          const testPoints = getSnapPoints(testPiece);
+          healed.forEach(anchorPiece => {
+            const anchorPoints = getSnapPoints(anchorPiece);
+            testPoints.forEach(tp => {
+              anchorPoints.forEach(ap => {
+                const dist = Math.hypot(tp.x - ap.x, tp.y - ap.y);
+                if (dist < bestDist) {
+                  bestDist = dist;
+                  bestSnapDx = ap.x - tp.x;
+                  bestSnapDy = ap.y - tp.y;
+                  bestIdx = idx;
+                }
+              });
+            });
+          });
+        });
+        
+        if (bestIdx !== -1) {
+          let p = unanchored[bestIdx];
+          if (bestDist < 15 && bestDist > 0.01) {
+            p.x += bestSnapDx;
+            p.y += bestSnapDy;
+          }
+          healed.push(p);
+          unanchored.splice(bestIdx, 1);
+        } else {
+          healed.push(unanchored.shift());
+        }
+      }
+      
+      return healed.map(({points, ...p}) => p);
+    };
+
+    const autoCenterSilhouette = (pieces, targetX, targetY) => {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      
+      pieces.forEach(p => {
+        const basePiece = SHAPES[p.id];
+        if (!basePiece) return;
+        const pts = getSnapPoints({ ...basePiece, ...p });
+        pts.forEach(pt => {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        });
+      });
+
+      const currentCenterX = (minX + maxX) / 2;
+      const currentCenterY = (minY + maxY) / 2;
+      
+      const dx = targetX - currentCenterX;
+      const dy = targetY - currentCenterY;
+      
+      return pieces.map(p => ({
+        ...p,
+        x: p.x + dx,
+        y: p.y + dy
+      }));
+    };
+
+    const getPieceCenter = (piece) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    };
+
+    const keepInBounds = (piece, viewW, viewH) => {
+      const pts = getVertices(piece);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      
+      let dx = 0, dy = 0;
+      const pad = 10; 
+      if (minX < pad) dx = pad - minX;
+      else if (maxX > viewW - pad) dx = (viewW - pad) - maxX;
+      
+      if (minY < pad) dy = pad - minY;
+      else if (maxY > viewH - pad) dy = (viewH - pad) - maxY;
+      
+      return { ...piece, x: piece.x + dx, y: piece.y + dy };
+    };
+
+    const parseDatText = (text, targetX, targetY) => {
+      try {
+        const lines = text.trim().split('\n')
+          .map(l => l.trim().split(/\s+/).map(Number))
+          .filter(l => l.length >= 6);
+          
+        if (lines.length < 7) return null;
+
+        const idMap = [1, 2, 5, 6, 3, 4, 0];
+        const parsedPieces = lines.slice(0, 7).map((l, i) => {
+          const [X, Y, x1, y1, x2, y2] = l;
+          const id = idMap[i];
+          const DA = { x: X + x1, y: Y + y1 };
+          const DB = { x: X + x2, y: Y + y2 };
+          const dx = DB.x - DA.x;
+          const dy = DB.y - DA.y;
+          
+          let delphiAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+          if (delphiAngle < 0) delphiAngle += 360;
+
+          let rotation = 0;
+          let nativeA = { x: 0, y: 0 };
+          let flipX = 1;
+
+          if ([1, 2, 3, 5, 6].includes(id)) {
+            rotation = (delphiAngle + 270) % 360;
+          } else if (id === 4) {
+            rotation = (delphiAngle + 90) % 360;
+            nativeA = { x: 64, y: 64 };
+          } else if (id === 0) {
+            rotation = delphiAngle;
+            nativeA = { x: 64, y: 64 };
+          }
+
+          const rad = rotation * Math.PI / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          const rotAx = nativeA.x * cos - nativeA.y * sin;
+          const rotAy = nativeA.x * sin + nativeA.y * cos;
+
+          return { 
+            id, 
+            x: DA.x - rotAx, 
+            y: DA.y - rotAy, 
+            rotation: Math.round(rotation / 45) * 45, 
+            flipX
+          };
+        });
+
+        return autoCenterSilhouette(healSilhouette(parsedPieces), targetX, targetY);
+      } catch {
+        return null;
+      }
+    };
+
+    // --- STATIC DATA ---
+    const INITIAL_SETUP_DATA = [
+      {"id": 1, "x": 148, "y": 265, "rotation": 270, "flipX": 1},
+      {"id": 2, "x": 276, "y": 137, "rotation": 90, "flipX": 1},
+      {"id": 3, "x": 211, "y": 352, "rotation": 225, "flipX": 1},
+      {"id": 6, "x": 147, "y": 352, "rotation": 270, "flipX": 1},
+      {"id": 4, "x": 211, "y": 352, "rotation": 90, "flipX": 1},
+      {"id": 0, "x": 275, "y": 288, "rotation": 90, "flipX": 1},
+      {"id": 5, "x": 275, "y": 416, "rotation": 180, "flipX": 1}
+    ];
+
+    // --- UNIFIED PUZZLE DATA ---
+    // This list now cleanly accepts BOTH the compressed classic strings AND your new exported JSON arrays!
+    const PUZZLE_DATA = {
+      level1: `167 262 1 92 93 184\n121 398 92 0 0 92\n166 353 47 46 1 0\n166 263 47 46 1 0\n147 244 66 66 131 1\n179 179 1 66 66 66\n168 40 1 92 47 138`,
+      level2: `149 266 130 130 130 0\n148 265 1 1 1 131\n167 110 46 0 0 46\n121 201 47 47 93 1\n149 201 65 0 0 65\n212 156 1 46 47 92\n121 155 92 47 138 1`,
+      level3: `199 121 130 130 130 0\n67 120 1 130 131 130\n262 250 1 1 1 66\n198 315 66 1 1 1\n67 249 66 66 131 1\n197 250 1 66 66 66\n132 250 1 65 1 130`,
+      level4: `161 205 1 92 93 184\n161 296 93 92 1 0\n207 387 1 46 47 92\n161 205 47 46 1 0\n143 433 65 0 0 65\n161 159 1 46 47 92\n161 17 47 46 1 0`,
+      level5: `107 264 92 0 0 92\n198 263 93 93 185 1\n106 263 47 47 93 1\n13 263 47 47 93 1\n199 199 65 0 0 65\n60 264 93 46 47 0\n60 124 1 92 47 138`,
+      level6: `152 265 92 0 0 92\n59 264 93 93 185 1\n243 219 1 46 47 92\n94 154 46 0 0 46\n59 265 1 92 93 92\n106 199 66 66 66 1\n289 219 1 92 47 138`,
+      level7: `231 131 1 92 93 184\n92 131 93 92 1 0\n78 264 65 65 65 0\n207 264 1 65 66 65\n143 199 65 0 0 65\n142 263 66 1 1 1\n207 263 66 66 131 66`,
+      level8: `166 158 93 92 1 0\n167 250 92 0 0 92\n86 212 65 65 65 0\n92 341 47 47 93 1\n179 106 1 65 66 130\n85 276 1 1 1 66\n138 341 46 1 0 47`,
+      level9: `129 164 93 92 1 0\n129 256 1 92 93 184\n175 164 1 46 47 92\n222 228 66 1 1 1\n129 348 1 92 93 92\n175 72 1 46 47 92\n221 99 1 65 1 130`,
+      level10: `123 215 93 93 185 1\n151 242 130 130 130 0\n170 170 46 0 0 46\n123 169 47 47 93 1\n150 242 66 65 1 0\n215 124 1 46 47 92\n124 123 46 1 0 47`,
+      level11: `97 271 92 0 0 92\n188 270 93 93 185 1\n308 206 65 65 65 0\n51 187 46 0 0 46\n31 297 66 66 131 1\n64 232 1 1 1 66\n213 130 47 46 1 0`,
+      level12: `218 258 1 1 1 131\n88 258 131 1 1 1\n218 166 47 46 1 0\n174 75 46 0 0 46\n126 166 93 1 1 1\n218 120 47 92 93 46\n128 120 46 1 0 47`,
+      level13: `144 148 131 1 1 1\n144 149 1 130 131 130\n274 171 1 1 1 66\n275 172 65 65 65 0\n115 279 65 0 0 65\n79 175 1 66 66 66\n179 278 66 1 1 1`,
+      level14: `190 212 92 0 0 92\n189 120 93 92 1 0\n33 239 65 65 65 0\n98 174 65 65 65 0\n138 303 66 66 131 1\n97 238 1 66 66 66\n73 303 66 66 131 66`,
+      level15: `127 238 93 93 185 1\n154 265 130 130 130 0\n140 99 1 46 47 92\n140 145 47 46 1 0\n153 265 66 65 1 0\n186 98 1 1 1 66\n251 99 1 92 47 138`,
+      level16: `133 300 1 130 131 130\n133 208 1 92 93 184\n225 257 47 46 1 0\n225 303 1 46 47 92\n132 83 1 92 93 92\n225 166 1 1 1 66\n225 34 1 65 1 130`,
+      level17: `146 51 131 1 1 1\n108 143 130 130 130 0\n173 78 1 65 66 65\n148 403 65 65 65 0\n173 272 93 1 1 1\n173 337 1 1 1 66\n108 272 66 66 131 66`,
+      level18: `142 210 1 1 1 131\n116 276 92 0 0 92\n272 210 1 1 1 66\n77 275 66 1 1 1\n207 211 1 65 66 130\n77 210 1 1 1 66\n272 211 1 65 1 130`,
+      level19: `165 274 1 130 131 130\n165 274 93 93 185 1\n100 247 47 46 1 0\n82 109 65 65 65 0\n100 274 1 65 66 130\n100 201 1 46 47 92\n146 109 47 46 1 0`,
+      level20: `134 208 1 1 1 131\n135 209 130 130 130 0\n329 273 1 1 1 66\n71 273 66 1 1 1\n135 144 65 0 0 65\n264 273 66 1 1 1\n6 273 66 66 131 66`,
+      level21: `207 145 1 130 131 130\n53 90 1 92 93 184\n306 274 1 1 1 66\n177 275 65 65 65 0\n112 274 66 66 131 1\n241 274 66 1 1 1\n47 274 66 66 131 66`,
+      level22: `112 106 92 0 0 92\n173 262 1 1 1 131\n174 328 65 65 65 0\n239 263 65 65 65 0\n171 197 66 66 131 1\n108 262 1 1 1 66\n107 197 66 1 1 1`,
+      level23: `180 309 1 130 131 130\n181 180 130 130 130 0\n285 67 1 46 47 92\n239 67 47 46 1 0\n180 309 66 66 131 1\n239 113 47 0 1 46\n51 373 66 1 1 1`,
+      level24: `204 275 93 93 185 1\n21 275 93 93 185 1\n204 276 1 65 66 65\n140 276 65 65 65 0\n75 211 65 0 0 65\n126 118 47 0 1 46\n139 210 66 1 1 1`,
+      level25: `202 340 93 93 185 1\n18 340 93 93 185 1\n157 341 46 0 0 46\n203 387 46 0 0 46\n111 249 92 92 92 0\n133 186 1 66 66 66\n111 386 92 47 138 1`,
+      level26: `137 239 1 1 1 131\n138 148 92 0 0 92\n204 122 47 47 93 1\n196 361 1 65 66 65\n183 58 65 0 0 65\n171 290 1 46 47 92\n72 305 1 65 1 130`,
+      level27: `107 216 93 93 185 1\n134 243 1 131 131 131\n264 243 1 1 1 66\n69 308 66 1 1 1\n199 243 1 66 66 131\n69 243 1 1 1 66\n264 243 1 66 1 131`,
+      level28: [{"id": 5, "x": 363, "y": 281, "rotation": 135, "flipX": 1},
+                          {"id": 1, "x": 317, "y": 363, "rotation": 180, "flipX": 1},
+                          {"id": 0, "x": 453, "y": 281, "rotation": 135, "flipX": 1},
+                          {"id": 3, "x": 253, "y": 427, "rotation": 225, "flipX": 1},
+                          {"id": 2, "x": 343, "y": 337, "rotation": 45, "flipX": 1},
+                          {"id": 4, "x": 368, "y": 196, "rotation": 135, "flipX": 1},
+                          {"id": 6, "x": 267, "y": 143, "rotation": 0, "flipX": 1}
+                          ],
+      
+      level29: `145 247 1 130 131 130\n145 247 131 1 1 1\n81 182 1 65 66 65\n211 183 65 65 65 0\n146 182 66 66 131 1\n275 182 1 66 66 66\n81 182 66 1 1 1`,
+      level30: `112 136 93 92 1 0\n204 136 1 92 93 184\n158 365 47 47 93 1\n158 228 1 46 47 92\n204 228 1 92 93 92\n112 274 1 46 47 92\n159 319 92 47 138 1`,
+      level31: `212 143 93 92 1 0\n166 243 130 130 130 0\n295 244 1 65 66 65\n212 143 66 1 1 1\n121 170 92 92 92 0\n121 261 1 1 1 66\n75 326 92 47 138 1`,
+      level32: `208 153 1 92 93 184\n106 255 92 0 0 92\n105 217 1 1 1 66\n170 153 1 65 66 65\n170 152 66 66 131 1\n105 152 1 1 1 66\n105 217 1 65 1 130`,
+      level33: `159 210 130 130 130 0\n158 209 1 1 1 131\n67 185 46 0 0 46\n67 295 47 47 93 1\n159 145 65 0 0 65\n67 230 1 1 1 66\n288 181 1 65 1 130`,
+      level34: `106 315 92 0 0 92\n105 223 93 92 1 0\n198 269 46 0 0 46\n105 85 1 46 47 92\n197 314 93 1 1 1\n151 223 47 0 1 46\n105 131 47 46 1 0`,
+      level35: `206 141 130 130 130 0\n75 141 1 130 131 130\n140 270 66 1 1 1\n270 270 1 1 1 66\n140 335 66 66 131 1\n205 270 66 1 1 1\n75 270 66 1 1 1`,
+      level36: `116 183 93 92 1 0\n116 275 1 92 93 184\n263 184 65 65 65 0\n181 247 47 47 93 1\n116 367 1 92 93 92\n150 106 47 0 1 46\n116 182 66 66 131 66`,
+      level37: `201 208 93 93 1 1\n109 208 1 93 93 185\n201 208 47 47 93 1\n63 254 47 47 93 1\n138 143 66 1 1 66\n247 208 47 1 1 47\n63 208 47 1 1 47`,
+      level38: `128 208 1 93 93 185\n90 262 1 131 131 131\n64 236 66 1 1 1\n128 208 47 47 1 1\n285 99 1 93 93 93\n128 162 47 1 1 47\n220 189 66 66 66 1`,
+      level39: `137 150 1 1 1 131\n153 134 131 131 131 1\n133 356 47 1 1 47\n225 264 1 47 47 93\n158 285 1 1 1 93\n179 310 1 47 47 93\n225 356 47 1 1 47`,
+      level40: `184 76 93 93 1 1\n184 260 131 1 1 1\n184 260 47 47 1 1\n138 193 1 47 47 93\n184 195 66 1 1 66\n184 306 1 47 47 93\n138 239 47 47 1 1`,
+      level41: `172 291 93 1 1 93\n172 253 1 1 1 131\n126 199 1 47 47 93\n80 199 47 47 1 1\n172 161 93 93 93 1\n80 153 1 47 47 93\n126 245 1 93 47 139`,
+      level42: `184 76 93 93 1 1\n54 77 131 131 131 1\n156 242 47 1 1 47\n317 226 66 1 1 1\n225 117 93 1 1 1\n317 161 1 1 1 66\n8 207 47 1 1 47`,
+      level43: `140 159 1 131 131 131\n140 289 131 1 1 1\n132 327 1 47 47 93\n94 245 1 47 47 93\n178 327 1 93 93 93\n75 159 1 1 1 66\n139 29 1 66 1 131`,
+      level44: `71 161 131 1 1 1\n201 161 1 1 1 131\n202 337 46 0 0 46\n246 245 47 46 1 0\n155 245 92 92 92 0\n109 245 1 46 47 92\n110 336 46 1 0 47`,
+      level45: `152 169 93 93 1 1\n107 306 93 1 1 93\n197 214 47 47 93 1\n106 261 1 47 47 93\n60 169 93 1 1 1\n198 261 1 47 47 93\n197 168 47 1 1 47`,
+      level46: `139 296 1 130 131 130\n139 100 1 1 1 131\n203 359 66 1 1 1\n205 101 65 65 65 0\n139 231 1 65 66 130\n204 230 66 1 1 1\n139 166 66 65 66 0`,
+      level47: `66 150 131 1 1 1\n196 150 1 1 1 131\n196 234 1 46 47 92\n242 233 47 46 1 0\n100 313 65 0 0 65\n104 235 1 46 47 92\n164 312 66 66 131 66`,
+      level48: `199 165 1 92 93 184\n108 257 92 0 0 92\n107 257 47 46 1 0\n153 210 47 47 93 1\n107 164 1 1 1 93\n107 211 47 0 1 46\n154 164 46 1 0 47`,
+      level49: `131 155 92 0 0 92\n130 246 131 1 1 1\n194 395 65 65 65 0\n223 339 47 46 1 0\n40 63 92 92 92 0\n85 155 1 46 47 92\n131 63 1 92 47 138`,
+      level50: `36 195 131 1 1 1\n36 196 1 130 131 130\n166 260 1 1 1 66\n167 197 65 65 65 0\n36 325 66 66 131 1\n296 131 66 1 1 1\n231 132 66 65 66 0`,
+      level51: `105 249 1 1 1 131\n173 181 130 130 130 0\n302 180 1 65 66 65\n230 310 1 1 1 66\n143 158 1 92 93 92\n143 112 47 0 1 46\n40 250 1 65 1 130`,
+      level52: `117 208 130 130 130 0\n116 207 1 1 1 131\n116 143 1 65 66 65\n181 142 66 1 1 1\n117 78 65 0 0 65\n150 337 1 1 1 66\n116 142 66 1 1 1`,
+      level53: `93 120 1 92 93 184\n185 120 93 92 1 0\n206 281 47 47 93 1\n246 288 1 46 47 92\n207 217 65 0 0 65\n161 282 1 46 47 92\n18 89 66 66 131 66`,
+      level54: `141 137 1 1 1 131\n142 138 130 130 130 0\n241 332 66 1 1 1\n241 268 1 65 66 65\n142 73 65 0 0 65\n176 267 1 1 1 66\n111 268 66 65 66 0`,
+      level55: `131 101 93 92 1 0\n131 193 1 92 93 184\n85 331 47 46 1 0\n132 55 46 0 0 46\n131 100 93 1 1 1\n85 285 47 0 1 46\n223 285 47 46 1 0`,
+      level56: `87 178 1 92 93 184\n179 178 1 130 131 130\n74 145 1 46 47 92\n28 145 47 46 1 0\n217 307 1 1 1 93\n28 191 1 46 47 92\n308 178 1 65 1 130`,
+      level57: `181 230 130 130 130 0\n88 267 93 93 185 1\n89 222 46 0 0 46\n238 112 46 0 0 46\n88 268 1 92 93 92\n252 157 1 66 66 66\n180 222 46 1 0 47`,
+      level58: `130 192 93 92 1 0\n221 191 1 92 93 184\n130 90 47 46 1 0\n19 90 1 46 47 92\n156 217 66 66 131 1\n65 150 1 66 66 66\n313 191 47 46 1 0`,
+      level59: `172 114 131 1 1 1\n126 253 1 130 131 130\n256 199 47 46 1 0\n210 336 47 47 93 1\n211 245 92 92 92 0\n126 115 1 46 47 92\n126 161 47 46 1 0`,
+      level60: `152 161 93 92 1 0\n107 299 92 0 0 92\n198 253 1 46 47 92\n152 115 1 46 47 92\n152 68 93 1 1 1\n106 69 1 46 47 92\n198 115 47 46 1 0`,
+      level61: `208 91 93 92 1 0\n79 211 130 130 130 0\n272 275 66 1 1 1\n208 275 1 1 1 66\n209 276 65 0 0 65\n143 90 1 66 66 66\n78 91 1 65 1 130`,
+      level62: `234 218 93 92 1 0\n104 272 1 130 131 130\n188 171 1 46 47 92\n169 336 66 1 1 1\n234 88 66 65 1 0\n169 87 1 66 66 66\n104 88 1 65 1 130`,
+      level63: `73 199 1 130 131 130\n136 263 131 1 1 1\n202 330 1 65 66 65\n266 265 1 65 66 65\n73 135 1 65 66 130\n200 198 1 66 66 66\n73 70 1 65 1 130`,
+      level64: `89 97 1 130 131 130\n180 187 131 1 1 1\n89 96 47 47 93 1\n173 318 46 0 0 46\n107 298 66 66 131 1\n218 272 1 46 47 92\n135 96 46 1 0 47`,
+      level65: `211 183 93 92 1 0\n101 45 92 0 0 92\n146 182 66 1 1 1\n100 183 1 46 47 92\n100 136 1 1 1 93\n146 301 1 66 66 66\n100 229 47 46 1 0`,
+      level66: `78 257 130 130 130 0\n77 126 1 1 1 131\n272 126 66 1 1 1\n143 127 65 65 65 0\n272 127 66 65 1 0\n207 126 1 66 66 66\n207 192 1 65 1 130`,
+      level67: `226 202 93 92 1 0\n69 202 1 92 93 184\n98 74 65 65 65 0\n162 73 1 1 1 66\n226 74 66 65 1 0\n161 320 1 66 66 66\n97 138 66 1 1 1`,
+      level68: `210 291 93 1 1 93\n118 291 93 93 185 1\n309 384 47 47 1 1\n200 376 47 47 1 1\n3 162 66 1 1 66\n54 226 1 1 1 66\n54 291 66 66 131 66`,
+      level69: `82 68 1 92 93 184\n101 297 93 93 185 1\n174 187 1 65 66 65\n239 160 47 46 1 0\n194 206 92 92 92 0\n174 67 1 66 66 66\n239 68 47 46 1 0`,
+      level70: `55 103 130 130 130 0\n184 103 1 130 131 130\n119 232 66 1 1 1\n249 232 1 1 1 66\n119 297 66 66 131 1\n184 232 1 1 1 66\n54 232 66 1 1 1`,
+      level71: `96 250 1 1 1 131\n161 185 131 1 1 1\n245 270 47 46 1 0\n227 316 65 65 65 0\n97 121 65 0 0 65\n96 185 1 1 1 66\n161 120 66 66 131 66`,
+      level72: [
+        {"id": 1, "x": 196, "y": 317, "rotation": 45, "flipX": 1},
+        {"id": 4, "x": 331, "y": 363, "rotation": 135, "flipX": 1},
+        {"id": 6, "x": 331, "y": 363, "rotation": 225, "flipX": 1},
+        {"id": 0, "x": 350, "y": 317, "rotation": 180, "flipX": 1},
+        {"id": 2, "x": 241, "y": 272, "rotation": 135, "flipX": 1},
+        {"id": 3, "x": 196, "y": 227, "rotation": 225, "flipX": 1},
+        {"id": 5, "x": 305, "y": 208, "rotation": 135, "flipX": 1}
+      ],
+      level73: `86 97 1 92 93 184\n86 189 1 130 131 130\n178 97 47 46 1 0\n152 319 65 65 65 0\n86 318 66 66 131 1\n216 318 1 1 1 66\n178 96 66 66 131 66`,
+      level74: `59 136 93 93 185 1\n59 294 92 0 0 92\n223 182 66 1 1 1\n198 137 46 0 0 46\n118 196 66 65 1 0\n196 294 1 46 47 92\n242 202 47 46 1 0`,
+      level75: `96 264 1 130 131 130\n96 133 1 1 1 131\n226 133 1 1 1 66\n162 134 65 65 65 0\n96 199 1 65 66 130\n161 229 1 66 66 66\n161 328 66 1 1 1`,
+      level76: `39 248 130 130 130 0\n122 163 1 1 1 131\n168 293 1 1 1 66\n252 163 1 1 1 66\n123 99 65 0 0 65\n103 376 1 66 66 66\n187 98 66 1 1 1`,
+      level77: `100 204 1 130 131 130\n100 112 1 92 93 184\n166 334 65 65 65 0\n202 268 47 47 93 1\n100 333 66 66 131 1\n192 111 1 1 1 66\n230 268 1 65 1 130`,
+      level78: `89 194 1 1 1 131\n157 128 130 130 130 0\n221 257 1 1 1 66\n220 128 1 1 1 66\n221 258 1 65 66 130\n89 129 1 66 66 66\n89 260 66 65 66 0`,
+      level79: `220 234 1 130 131 130\n91 234 130 130 130 0\n220 233 66 1 1 1\n285 168 1 1 1 66\n90 168 66 66 131 1\n220 168 1 66 66 66\n155 169 66 65 66 0`,
+      level80: `94 96 131 1 1 1\n95 291 130 130 130 0\n95 356 1 1 1 66\n224 96 1 1 1 66\n159 162 66 65 1 0\n224 355 1 66 66 66\n159 227 66 65 66 0`,
+      level81: `170 161 1 92 93 184\n124 114 93 93 185 1\n170 161 47 46 1 0\n123 390 47 47 93 1\n170 253 1 92 93 92\n76 299 1 46 47 92\n124 344 46 1 0 47`,
+      level82: `77 185 93 92 1 0\n141 158 1 92 93 184\n78 304 65 65 65 0\n77 185 66 1 1 1\n233 276 1 92 93 92\n77 120 1 66 66 66\n233 93 1 65 1 130`,
+      level83: `102 191 93 92 1 0\n102 99 1 92 93 184\n195 329 46 0 0 46\n103 329 46 0 0 46\n102 98 1 1 1 93\n148 283 1 46 47 92\n221 309 66 1 1 1`,
+      level84: `64 161 1 130 131 130\n195 161 130 130 130 0\n64 290 1 1 1 66\n259 354 66 1 1 1\n129 290 66 66 131 1\n259 289 1 66 66 66\n64 291 66 65 66 0`,
+      level85: `82 119 1 130 131 130\n147 247 131 1 1 1\n83 314 65 65 65 0\n82 248 1 1 1 66\n213 91 92 92 92 0\n212 182 1 66 66 66\n82 249 1 65 1 130`,
+      level86: `104 253 1 130 131 130\n150 114 131 1 1 1\n234 199 47 46 1 0\n188 336 47 47 93 1\n189 245 92 92 92 0\n104 115 1 46 47 92\n104 161 47 46 1 0`,
+      level87: `44 246 130 130 130 0\n108 115 1 1 1 131\n192 208 46 0 0 46\n173 206 1 1 1 66\n237 115 93 1 1 1\n237 162 1 46 47 92\n108 181 66 65 66 0`,
+      level88: `104 253 1 130 131 130\n150 114 131 1 1 1\n234 199 47 46 1 0\n253 337 1 65 66 65\n188 272 1 65 66 130\n104 115 1 46 47 92\n104 161 47 46 1 0`,
+      level89: `107 96 1 1 1 131\n107 226 1 1 1 131\n108 292 65 65 65 0\n108 162 65 65 65 0\n173 97 65 0 0 65\n237 161 1 66 66 66\n237 225 47 46 1 0`,
+      level90: `151 224 131 1 1 1\n91 133 92 0 0 92\n217 291 1 65 66 65\n87 290 65 65 65 0\n86 225 66 65 1 0\n281 290 1 66 66 66\n86 224 66 66 131 66`,
+      level91: `237 212 93 92 1 0\n80 93 1 92 93 184\n173 331 65 65 65 0\n172 93 1 65 66 65\n107 330 66 66 131 1\n172 211 1 66 66 66\n172 92 66 1 1 1`,
+      level92: `74 88 1 1 1 131\n202 88 131 1 1 1\n175 285 65 65 65 0\n174 219 1 1 1 66\n139 90 65 0 0 65\n174 154 1 66 66 66\n174 220 66 65 66 0`,
+      level93: `163 282 130 130 130 0\n97 217 1 130 131 130\n97 216 66 1 1 1\n246 236 47 46 1 0\n97 346 66 66 131 1\n97 151 1 66 66 66\n246 144 1 92 47 138`,
+      level94: `160 266 1 1 1 131\n161 137 130 130 130 0\n95 201 1 1 1 66\n225 136 1 1 1 66\n95 267 1 65 66 130\n95 136 1 66 66 66\n95 202 1 65 1 130`,
+      level95: `78 299 1 1 1 131\n209 299 131 1 1 1\n275 235 65 65 65 0\n78 170 1 65 66 65\n143 235 65 0 0 65\n78 234 1 66 66 66\n274 170 1 65 1 130`,
+      level96: `43 97 131 1 1 1\n44 228 130 130 130 0\n284 295 1 65 66 65\n219 230 1 65 66 65\n219 97 1 1 1 93\n219 294 1 1 1 66\n173 136 1 92 47 138`,
+      level97: `233 122 1 1 1 131\n104 252 130 130 130 0\n233 317 1 65 66 65\n38 121 66 1 1 1\n103 186 66 66 131 1\n103 121 1 66 66 66\n168 187 66 65 66 0`,
+      level98: `197 163 1 1 1 131\n68 255 130 130 130 0\n224 319 66 1 1 1\n132 163 66 1 1 1\n197 293 1 92 93 92\n289 319 1 66 66 66\n67 163 66 1 1 1`,
+      level99: `110 217 1 92 93 184\n202 183 1 1 1 131\n201 399 1 65 66 65\n287 183 1 46 47 92\n203 54 65 0 0 65\n202 118 1 66 66 66\n46 308 1 65 1 130`,
+      level100: `206 155 1 1 1 131\n76 247 131 1 1 1\n114 286 47 46 1 0\n58 137 46 0 0 46\n207 91 65 0 0 65\n84 182 1 66 66 66\n271 156 1 65 1 130`,
+      
+      "level101_Custom": [
+        {"id": 4, "x": 344, "y": 228, "rotation": 135, "flipX": 1},
+        {"id": 5, "x": 299, "y": 183, "rotation": 135, "flipX": 1},
+        {"id": 6, "x": 299, "y": 183, "rotation": 315, "flipX": 1},
+        {"id": 1, "x": 299, "y": 273, "rotation": 45, "flipX": 1},
+        {"id": 3, "x": 208, "y": 364, "rotation": 225, "flipX": 1},
+        {"id": 2, "x": 144, "y": 300, "rotation": 45, "flipX": 1},
+        {"id": 0, "x": 99, "y": 254, "rotation": 315, "flipX": -1}
+      ],
+      "level102_Custom": [
+        {"id": 4, "x": 232, "y": 216, "rotation": 180, "flipX": 1},
+        {"id": 6, "x": 232, "y": 152, "rotation": 0, "flipX": 1},
+        {"id": 5, "x": 232, "y": 152, "rotation": 180, "flipX": 1},
+        {"id": 1, "x": 200, "y": 216, "rotation": 0, "flipX": 1},
+        {"id": 3, "x": 328, "y": 306, "rotation": 180, "flipX": 1},
+        {"id": 2, "x": 419, "y": 306, "rotation": 135, "flipX": 1},
+        {"id": 0, "x": 464, "y": 170, "rotation": 315, "flipX": -1}
+      ],
+      "مرح حامد": [{"id": 3, "x": 202, "y": 303, "rotation": 270, "flipX": 1},
+                          {"id": 6, "x": 266, "y": 213, "rotation": 90, "flipX": 1},
+                          {"id": 4, "x": 330, "y": 213, "rotation": 90, "flipX": 1},
+                          {"id": 0, "x": 394, "y": 341, "rotation": 180, "flipX": 1},
+                          {"id": 2, "x": 293, "y": 303, "rotation": 90, "flipX": 1},
+                          {"id": 1, "x": 266, "y": 213, "rotation": 270, "flipX": 1},
+                          {"id": 5, "x": 338, "y": 386, "rotation": 135, "flipX": 1}
+                          ],
+        "": [{"id": 2, "x": 401, "y": 298, "rotation": 135, "flipX": 1},
+                          {"id": 1, "x": 220, "y": 298, "rotation": 315, "flipX": 1},
+                          {"id": 0, "x": 288, "y": 366, "rotation": 45, "flipX": -1},
+                          {"id": 3, "x": 279, "y": 420, "rotation": 315, "flipX": 1},
+                          {"id": 5, "x": 388, "y": 484, "rotation": 135, "flipX": 1},
+                          {"id": 6, "x": 111, "y": 344, "rotation": 270, "flipX": 1},
+                          {"id": 4, "x": 299, "y": 216, "rotation": 225, "flipX": 1}
+                          ]
+    };
+
+    // Component for rendering pure, auto-centered thumbnails for the menu
+    const MiniSilhouette = ({ pieces, className = "" }) => {
+      if (!pieces || pieces.length === 0) return null;
+      
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      pieces.forEach(p => {
+        const basePiece = SHAPES[p.id];
+        if (!basePiece) return;
+        const pts = getVertices({ ...basePiece, ...p });
+        pts.forEach(pt => {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = p.y;
+        });
+      });
+
+      if (minX === Infinity) { minX = 0; maxX = 200; minY = 0; maxY = 200; }
+
+      const pad = 15;
+      const vX = minX - pad;
+      const vY = minY - pad;
+      const vW = (maxX - minX) + pad * 2;
+      const vH = (maxY - minY) + pad * 2;
+
+      return (
+        <svg viewBox={`${vX} ${vY} ${vW} ${vH}`} className={`pointer-events-none drop-shadow-md ${className}`}>
+          {pieces.map((piece, idx) => {
+            const basePiece = SHAPES[piece.id];
+            if (!basePiece) return null;
+            return (
+              <polygon
+                key={`mini-${idx}`}
+                points={basePiece.points}
+                fill="#dc2626"
+                stroke="#dc2626"
+                strokeWidth="8"
+                strokeLinejoin="round"
+                transform={`translate(${piece.x}, ${piece.y}) rotate(${piece.rotation}) scale(${piece.flipX}, 1)`}
+              />
+            );
+          })}
+        </svg>
+      );
+    };
+
+    // --- NEW: STRICT SHAPE COVERAGE WIN CHECK ENGINE ---
+    const checkWinConditionCanvas = (currentPieces, targetPieces) => {
+      if (!targetPieces || targetPieces.length === 0) return false;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      
+      const updateBounds = (piece) => {
+        getVertices(piece).forEach(v => {
+          if (v.x < minX) minX = v.x;
+          if (v.x > maxX) maxX = v.x;
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        });
+      };
+
+      targetPieces.forEach(updateBounds);
+      currentPieces.forEach(updateBounds);
+
+      const pad = 20;
+      const w = Math.ceil(maxX - minX + pad * 2);
+      const h = Math.ceil(maxY - minY + pad * 2);
+      
+      if (w <= 0 || h <= 0 || w > 4000 || h > 4000) return false;
+
+      const canvasA = document.createElement('canvas');
+      const canvasB = document.createElement('canvas');
+      canvasA.width = w; canvasA.height = h;
+      canvasB.width = w; canvasB.height = h;
+
+      const ctxA = canvasA.getContext('2d', { willReadFrequently: true });
+      const ctxB = canvasB.getContext('2d');
+
+      const drawOffsetX = minX - pad;
+      const drawOffsetY = minY - pad;
+
+      const drawPoly = (ctx, vertices) => {
+        ctx.beginPath();
+        ctx.moveTo(vertices[0].x - drawOffsetX, vertices[0].y - drawOffsetY);
+        for(let i=1; i<vertices.length; i++) {
+          ctx.lineTo(vertices[i].x - drawOffsetX, vertices[i].y - drawOffsetY);
+        }
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      ctxA.fillStyle = 'black';
+      targetPieces.forEach(p => drawPoly(ctxA, getVertices(p)));
+
+      ctxB.fillStyle = 'black';
+      currentPieces.forEach(p => drawPoly(ctxB, getVertices(p)));
+
+      ctxA.globalCompositeOperation = 'xor';
+      ctxA.drawImage(canvasB, 0, 0);
+
+      const imgData = ctxA.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      let errorPixels = 0;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 128) errorPixels++;
+      }
+
+      return errorPixels < 500;
+    };
+
+    // --- MAIN APPLICATION ---
+    function App() {
+      const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+      // --- NEW: Cloud Scoreboard State ---
+      const [user, setUser] = useState(null);
+      const [displayName, setDisplayName] = useState("");
+      const [showNamePrompt, setShowNamePrompt] = useState(false);
+      const [nameInput, setNameInput] = useState("");
+      const [solvedLevels, setSolvedLevels] = useState([]);
+      const [leaderboardData, setLeaderboardData] = useState([]);
+      const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+      useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+      }, []);
+
+      // --- NEW: Authenticate & Fetch Cloud Data ---
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            // Directly sign in anonymously using your own Firebase Auth
+            await signInAnonymously(auth);
+          } catch (error) {
+            console.error("Firebase Auth Error:", error);
+          }
+        };
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, setUser);
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+
+        const leaderboardRef = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
+        
+        // Fetch current user's save data
+        const userDocRef = doc(leaderboardRef, user.uid);
+        getDoc(userDocRef).then((docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setDisplayName(data.displayName || "Player");
+            setSolvedLevels(data.solvedLevels || []);
+          } else {
+            setShowNamePrompt(true); // New user! Ask for name.
+          }
+        });
+
+        // Listen to global leaderboard updates
+        const unsubscribeLeaderboard = onSnapshot(leaderboardRef, (snapshot) => {
+          const players = [];
+          snapshot.forEach((doc) => {
+            players.push({ id: doc.id, ...doc.data() });
+          });
+          // Sort players by total solved puzzles
+          players.sort((a, b) => (b.solvedCount || 0) - (a.solvedCount || 0));
+          setLeaderboardData(players);
+        }, (error) => {
+          console.error("Leaderboard fetch error:", error);
+        });
+
+        return () => unsubscribeLeaderboard();
+      }, [user]);
+
+      // --- NEW: Save Player Name ---
+      const handleSaveName = async () => {
+        if (!nameInput.trim() || !user) return;
+        const finalName = nameInput.trim();
+        setDisplayName(finalName);
+        setShowNamePrompt(false);
+
+        const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+        await setDoc(userDocRef, {
+          displayName: finalName,
+          solvedCount: solvedLevels.length,
+          solvedLevels: solvedLevels
+        }, { merge: true });
+      };
+
+      const layout = useMemo(() => {
+        const w = isMobile ? 500 : 800;
+        const h = isMobile ? 750 : 600;
+        return {
+          VIEW_W: w,
+          VIEW_H: h,
+          SIL_X: isMobile ? w * 0.5 : w * 0.35,
+          SIL_Y: isMobile ? h * 0.38 : h * 0.5, // Shifted UP slightly on mobile (was 0.42)
+          INIT_X: isMobile ? w * 0.5 : w * 0.80,
+          INIT_Y: isMobile ? h * 0.88 : h * 0.5, // Shifted DOWN significantly on mobile (was 0.82)
+        };
+      }, [isMobile]);
+
+      // Regenerate level data using the dynamic responsive targets
+      const processedLevels = useMemo(() => {
+        const levels = {};
+        
+        // Loop through the unified PUZZLE_DATA and process based on type (String or Array)
+        Object.keys(PUZZLE_DATA).forEach(key => {
+          const data = PUZZLE_DATA[key];
+          if (typeof data === 'string') {
+            levels[key] = parseDatText(data, layout.SIL_X, layout.SIL_Y);
+          } else if (Array.isArray(data)) {
+            levels[key] = autoCenterSilhouette(data, layout.SIL_X, layout.SIL_Y);
+          }
+        });
+
+        return levels;
+      }, [layout]);
+
+      const initialPieces = useMemo(() => {
+        let parsedInitial = INITIAL_SETUP_DATA.map(p => ({...p}));
+        
+        let group1 = parsedInitial.filter(p => p.id === 1 || p.id === 2);
+        let group2 = parsedInitial.filter(p => p.id !== 1 && p.id !== 2);
+
+        group1 = autoCenterSilhouette(group1, 0, 0);
+        group2 = autoCenterSilhouette(group2, 0, 0);
+
+        if (!isMobile) {
+          const gap = 16;
+          const shift = 95;
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y - shift - gap }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X, y: p.y + layout.INIT_Y + shift + gap }));
+        } else {
+          const gap = 8;
+          const shift = 95;
+          group1 = group1.map(p => ({ ...p, x: p.x + layout.INIT_X - shift - gap, y: p.y + layout.INIT_Y }));
+          group2 = group2.map(p => ({ ...p, x: p.x + layout.INIT_X + shift + gap, y: p.y + layout.INIT_Y }));
+        }
+
+        parsedInitial = [...group1, ...group2];
+
+        return parsedInitial.map(p => ({
+          ...p,
+          color: SHAPES[p.id].color,
+          points: SHAPES[p.id].points
+        }));
+      }, [layout, isMobile]);
+
+      // Game State
+      const [activeLevel, setActiveLevel] = useState('level1');
+      const [mode, setMode] = useState('play'); // play | build
+      const [pieces, setPieces] = useState(initialPieces);
+      const [hasWon, setHasWon] = useState(false);
+      
+      // UI State
+      const [isMenuOpen, setIsMenuOpen] = useState(false);
+      const [exportData, setExportData] = useState(null);
+      const [copySuccess, setCopySuccess] = useState(false);
+
+      // Drag State
+      const [draggingId, setDraggingId] = useState(null);
+      const [offset, setOffset] = useState({ x: 0, y: 0 });
+      const svgRef = useRef(null);
+      
+      const hasDraggedRef = useRef(false);
+      const dragStartPosRef = useRef({ x: 0, y: 0 });
+
+      useEffect(() => {
+        setPieces(initialPieces);
+      }, [initialPieces]);
+
+      const loadLevel = (level) => {
+        setActiveLevel(level);
+        setPieces(initialPieces); 
+        setHasWon(false);
+      };
+
+      // --- NEW: Keyboard Navigation ---
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (isMenuOpen || exportData) return; // Disable if modals/menus are open
+          
+          const levelKeys = Object.keys(processedLevels);
+          const currentIndex = levelKeys.indexOf(activeLevel);
+
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
+            loadLevel(nextLevel);
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prevLevel = levelKeys[(currentIndex - 1 + levelKeys.length) % levelKeys.length];
+            loadLevel(prevLevel);
+          }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [activeLevel, processedLevels, isMenuOpen, exportData, initialPieces]);
+
+      const handleExportJSON = () => {
+        const formattedPieces = pieces.map(p => 
+          `{"id": ${p.id}, "x": ${Math.round(p.x)}, "y": ${Math.round(p.y)}, "rotation": ${p.rotation}, "flipX": ${p.flipX}}`
+        );
+        const indent = "                          "; // 26 spaces for perfect alignment
+        const resultString = `"level##_Custom": [${formattedPieces.join(',\n' + indent)}\n${indent}]`;
+        setExportData(resultString);
+      };
+
+      const copyToClipboard = () => {
+        const textArea = document.createElement("textarea");
+        textArea.value = exportData;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
+        } catch (err) {
+          console.error('Copy failed', err);
+        }
+        document.body.removeChild(textArea);
+      };
+
+      const getPointerCoords = (e) => {
+        if (!svgRef.current) return { x: 0, y: 0 };
+        const CTM = svgRef.current.getScreenCTM();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+          x: (clientX - CTM.e) / CTM.a,
+          y: (clientY - CTM.f) / CTM.d
+        };
+      };
+
+      const activeSilhouetteData = processedLevels[activeLevel] || [];
+
+      const calculateSnap = (testPiece, allPieces, targetSilhouette = []) => {
+        let bestSnap = { ...testPiece };
+        // LOWER MAGNET RADIUS: Shrunk from 20 down to 12 so it doesn't aggressively grab pieces!
+        let bestDist = 12;
+
+        const testPoints = getSnapPoints(testPiece);
+        const otherPieces = allPieces.filter(p => p.id !== testPiece.id);
+
+        const snapTargets = [...otherPieces, ...targetSilhouette];
+
+        snapTargets.forEach(otherPiece => {
+          const otherPoints = getSnapPoints(otherPiece);
+          testPoints.forEach(tp => {
+            otherPoints.forEach(op => {
+              const dist = Math.hypot(tp.x - op.x, tp.y - op.y);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestSnap.x = testPiece.x + (op.x - tp.x);
+                bestSnap.y = testPiece.y + (op.y - tp.y);
+              }
+            });
+          });
+        });
+        return bestSnap;
+      };
+
+      const flipPiece = (pieceId) => {
+        if (pieceId !== 0) return;
+        setPieces(prev => prev.map(p => {
+          if (p.id === pieceId) {
+            const oldCenter = getPieceCenter(p);
+            let flipped = { ...p, flipX: p.flipX * -1 };
+            const newCenter = getPieceCenter(flipped);
+            flipped.x += (oldCenter.x - newCenter.x);
+            flipped.y += (oldCenter.y - newCenter.y);
+            
+            flipped = keepInBounds(flipped, layout.VIEW_W, layout.VIEW_H);
+            return calculateSnap(flipped, prev, mode === 'play' ? activeSilhouetteData : []);
+          }
+          return p;
+        }));
+      };
+
+      const handlePointerDown = (e, piece) => {
+        if (hasWon) return; 
+        
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.button === 2) {
+          if (piece.id === 0) flipPiece(piece.id);
+          return;
+        }
+
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+        const coords = getPointerCoords(e);
+        setDraggingId(piece.id);
+        setOffset({ x: coords.x - piece.x, y: coords.y - piece.y });
+        
+        hasDraggedRef.current = false;
+        dragStartPosRef.current = coords;
+        
+        setPieces(prev => {
+          const p = prev.find(i => i.id === piece.id);
+          return [...prev.filter(i => i.id !== piece.id), p];
+        });
+      };
+
+      const handleTouchStart = (e, piece) => {
+        if (hasWon) return;
+        if (e.touches.length === 2 && piece.id === 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          flipPiece(piece.id);
+          setDraggingId(null);
+        }
+      };
+
+      useEffect(() => {
+        const handlePointerMove = (e) => {
+          if (draggingId === null) return;
+          e.preventDefault();
+          const coords = getPointerCoords(e);
+          
+          const startPos = dragStartPosRef.current;
+          if (Math.abs(coords.x - startPos.x) > 3 || Math.abs(coords.y - startPos.y) > 3) {
+            hasDraggedRef.current = true;
+          }
+
+          setPieces(prev => prev.map(p => 
+            p.id === draggingId ? { ...p, x: coords.x - offset.x, y: coords.y - offset.y } : p
+          ));
+        };
+
+        const handlePointerUp = () => {
+          if (draggingId !== null) {
+            setPieces(prev => {
+              let piece = prev.find(p => p.id === draggingId);
+              if (!piece) return prev;
+
+              if (!hasDraggedRef.current) {
+                const oldCenter = getPieceCenter(piece);
+                let rotated = { ...piece, rotation: (piece.rotation + 45) % 360 };
+                const newCenter = getPieceCenter(rotated);
+                rotated.x += (oldCenter.x - newCenter.x);
+                rotated.y += (oldCenter.y - newCenter.y);
+                piece = rotated;
+                
+                // Block double-rotations if touch devices fire both touchend AND pointerup
+                hasDraggedRef.current = true;
+              }
+
+              let snappedPiece = calculateSnap(piece, prev, mode === 'play' ? activeSilhouetteData : []);
+              snappedPiece = keepInBounds(snappedPiece, layout.VIEW_W, layout.VIEW_H);
+              
+              return prev.map(p => p.id === draggingId ? snappedPiece : p);
+            });
+            setDraggingId(null);
+          }
+        };
+
+        if (draggingId !== null) {
+          window.addEventListener('pointermove', handlePointerMove, { passive: false });
+          window.addEventListener('pointerup', handlePointerUp);
+          window.addEventListener('touchmove', handlePointerMove, { passive: false });
+          window.addEventListener('touchend', handlePointerUp);
+        }
+
+        return () => {
+          window.removeEventListener('pointermove', handlePointerMove);
+          window.removeEventListener('pointerup', handlePointerUp);
+          window.removeEventListener('touchmove', handlePointerMove);
+          window.removeEventListener('touchend', handlePointerUp); // FIXED TYPO: This was incorrectly 'touchmove', causing the massive listener leak!
+        };
+      }, [draggingId, offset, mode, activeSilhouetteData, layout]);
+
+      // --- NEW: Celebration Fireworks ---
+      useEffect(() => {
+        let interval;
+        
+        if (hasWon && mode === 'play' && window.confetti) {
+          const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
+
+          function randomInRange(min, max) {
+            return Math.random() * (max - min) + min;
+          }
+
+          // Run continuously every 300ms
+          interval = setInterval(function() {
+            window.confetti({
+              ...defaults, 
+              particleCount: 40, // Fixed amount per burst
+              origin: { x: randomInRange(0.1, 0.9), y: Math.random() - 0.2 }
+            });
+          }, 300); 
+        }
+        
+        // Cleanup function: stops the fireworks when hasWon becomes false
+        return () => {
+          if (interval) {
+            clearInterval(interval);
+          }
+        };
+      }, [hasWon, mode]);
+
+      useEffect(() => {
+        if (mode === 'play' && !hasWon && draggingId === null) {
+          if (checkWinConditionCanvas(pieces, activeSilhouetteData)) {
+            setHasWon(true);
+
+            // --- NEW: Record Win to Cloud Database ---
+            if (user && !solvedLevels.includes(activeLevel)) {
+              const newSolved = [...solvedLevels, activeLevel];
+              setSolvedLevels(newSolved); // Update local UI immediately
+              
+              // Push save to cloud
+              const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+              setDoc(userDocRef, {
+                displayName: displayName || "Anonymous Player",
+                solvedCount: newSolved.length,
+                solvedLevels: newSolved
+              }, { merge: true });
+            }
+          }
+        }
+      }, [pieces, mode, activeSilhouetteData, hasWon, draggingId, user, solvedLevels, activeLevel, displayName]);
+
+      // Format level name for display
+      const formatLevelName = (key) => {
+        if (key.includes('_Custom')) {
+          return key.replace('_Custom', '').replace(/_/g, ' '); // Cleanly displays "level101"
+        }
+        return `Puzzle ${key.replace('level', '')}`;
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-800 text-slate-100 flex flex-col font-sans selection:bg-transparent relative">
+          
+          <div className="bg-slate-900 p-4 shadow-lg flex flex-wrap items-center justify-between border-b border-slate-700 gap-4">
+            
+            <div className="flex flex-wrap items-center gap-4">
+              <h1 className="text-xl font-bold tracking-wider text-teal-400">TANGRAM V10.5 by Raed Shorrosh</h1>
+              
+              <div className="relative">
+                <button 
+                  onClick={() => setIsMenuOpen(!isMenuOpen)}
+                  className="flex items-center bg-slate-800 border border-slate-600 hover:border-teal-400 text-slate-200 rounded-md px-3 py-1.5 focus:outline-none transition-colors shadow-sm w-48 md:w-56"
+                  disabled={mode !== 'play'}
+                >
+                  <div className="w-8 h-8 mr-3 bg-slate-700 border border-slate-600 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    <MiniSilhouette pieces={activeSilhouetteData} className="w-full h-full p-0.5" />
+                  </div>
+                  <span className="flex-1 text-left text-sm font-medium truncate">
+                    {formatLevelName(activeLevel)}
+                  </span>
+                  <span className="ml-2 text-[10px] text-slate-400 opacity-80">▼</span>
+                </button>
+
+                {isMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+                    <div className="absolute top-full mt-2 left-0 w-[280px] sm:w-[500px] bg-slate-800 border border-slate-600 shadow-2xl rounded-lg z-50 max-h-[60vh] overflow-y-auto p-4 flex flex-col">
+                      <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3 px-1 flex justify-between">
+                        <span>Select Puzzle</span>
+                        <span className="text-teal-400">({Object.keys(processedLevels).length} Levels)</span>
+                      </h3>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                        {Object.keys(processedLevels).map((levelKey, idx) => (
+                          <button
+                            key={levelKey}
+                            onClick={() => { loadLevel(levelKey); setIsMenuOpen(false); }}
+                            className={`relative aspect-[3/4] p-2 rounded-md border flex flex-col items-center justify-between transition-all overflow-hidden ${
+                              activeLevel === levelKey 
+                                ? 'border-teal-400 bg-slate-700 ring-2 ring-teal-400 shadow-inner' 
+                                : 'border-slate-600 bg-slate-700 hover:bg-slate-600 hover:border-slate-400'
+                            }`}
+                          >
+                            <div className="flex-1 w-full flex items-center justify-center mb-1 min-h-0">
+                              <MiniSilhouette pieces={processedLevels[levelKey]} className="w-full h-full pointer-events-none p-1" />
+                            </div>
+                            <span className={`w-5 h-5 flex-shrink-0 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-md border relative z-10 ${solvedLevels.includes(levelKey) ? 'bg-teal-500 border-teal-400 text-slate-900 text-xs' : 'bg-indigo-500 border-indigo-400/50'}`}>
+                              {solvedLevels.includes(levelKey) ? '✓' : (idx + 1)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                <button
+                  onClick={() => { setMode('play'); setIsMenuOpen(false); }}
+                  className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${mode === 'play' ? 'bg-teal-500 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Play
+                </button>
+                <button
+                  onClick={() => { setMode('build'); setIsMenuOpen(false); }}
+                  className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${mode === 'build' ? 'bg-indigo-500 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Build
+                </button>
+              </div>
+
+              {/* --- NEW: Trophy / Leaderboard Button --- */}
+              <button
+                onClick={() => setShowLeaderboard(true)}
+                className="flex items-center justify-center bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-3 py-1.5 rounded-md text-sm font-bold transition-colors shadow-sm"
+                title="Global Leaderboard"
+              >
+                🏆 {solvedLevels.length} / {Object.keys(processedLevels).length}
+              </button>
+
+              <button 
+                onClick={() => setPieces(initialPieces)}
+                className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded text-sm font-semibold transition-colors border border-slate-600"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex-1 p-4 md:p-8 flex flex-col items-center justify-center overflow-hidden gap-4">
+            
+            <div className="relative bg-slate-100 rounded-xl shadow-2xl overflow-hidden border-4 border-slate-300 w-full max-w-[500px] md:max-w-[1000px] aspect-[2/3] md:aspect-[4/3] touch-none">
+              
+              <svg 
+                ref={svgRef} 
+                className="absolute inset-0 w-full h-full" 
+                viewBox={`0 0 ${layout.VIEW_W} ${layout.VIEW_H}`} 
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                
+                {mode === 'play' && activeSilhouetteData && activeSilhouetteData.map((piece, idx) => {
+                  const basePiece = SHAPES[piece.id];
+                  if (!basePiece) return null;
+                  return (
+                    <polygon
+                      key={`sil-${idx}`}
+                      points={basePiece.points}
+                      fill="#94a3b8"
+                      stroke="#94a3b8"
+                      strokeWidth="4"
+                      strokeLinejoin="round"
+                      transform={`translate(${piece.x}, ${piece.y}) rotate(${piece.rotation}) scale(${piece.flipX}, 1)`}
+                    />
+                  );
+                })}
+
+                {pieces.map((piece) => (
+                  <polygon
+                    key={`piece-${piece.id}`}
+                    points={piece.points}
+                    fill={piece.color} 
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    transform={`translate(${piece.x}, ${piece.y}) rotate(${piece.rotation}) scale(${piece.flipX}, 1)`}
+                    className={`drop-shadow-md transition-opacity ${hasWon ? 'cursor-default' : 'cursor-pointer hover:opacity-90'}`}
+                    onPointerDown={(e) => handlePointerDown(e, piece)}
+                    onTouchStart={(e) => handleTouchStart(e, piece)}
+                  />
+                ))}
+              </svg>
+              
+              {mode === 'build' && (
+                <div className="absolute top-4 left-4 right-4 flex justify-between items-center pointer-events-none">
+                  <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-lg border border-slate-200 shadow-sm text-sm text-slate-700 font-medium hidden md:block">
+                    <strong>Drag:</strong> 1 Finger/Click | <strong>Rotate:</strong> Quick Tap/Click | <strong>Flip Parallelogram:</strong> Right Click / 2-Finger Tap
+                  </div>
+                  
+                  <button 
+                    onClick={handleExportJSON}
+                    className="pointer-events-auto bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm transition-colors flex items-center gap-2 ml-auto"
+                  >
+                    <span>💾 Save Data (JSON)</span>
+                  </button>
+                </div>
+              )}
+
+              {hasWon && (
+                <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 pointer-events-auto">
+                  <div className="bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500">
+                    
+                    <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap">
+                      SOLVED!
+                    </h2>
+
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => { setHasWon(false); setPieces(initialPieces); }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold transition-colors shadow-md text-xs md:text-sm whitespace-nowrap"
+                      >
+                        Restart
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const levelKeys = Object.keys(processedLevels);
+                          const currentIndex = levelKeys.indexOf(activeLevel);
+                          const nextLevel = levelKeys[(currentIndex + 1) % levelKeys.length];
+                          loadLevel(nextLevel);
+                        }}
+                        className="px-3 py-2 md:px-4 md:py-2 rounded-xl md:rounded-full bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold transition-colors shadow-lg text-xs md:text-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
+                      >
+                        Next <span className="text-sm leading-none">&rarr;</span>
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {exportData && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-4">
+               <div className="bg-slate-800 p-6 rounded-lg shadow-2xl border border-slate-600 w-full max-w-lg flex flex-col">
+                 <div className="flex justify-between items-center mb-4">
+                   <h3 className="text-xl font-bold text-indigo-400">Exported Layout Data</h3>
+                   <button onClick={() => setExportData(null)} className="text-slate-400 hover:text-white font-bold text-xl">&times;</button>
+                 </div>
+                 
+                 <textarea 
+                   className="w-full h-64 bg-slate-900 text-green-400 font-mono text-sm p-4 rounded mb-4 border border-slate-700 focus:outline-none resize-none" 
+                   readOnly 
+                   value={exportData} 
+                 />
+                 
+                 <div className="flex justify-end gap-3">
+                   <button 
+                     onClick={copyToClipboard} 
+                     className={`px-5 py-2 rounded font-bold text-sm transition-colors ${copySuccess ? 'bg-green-600 hover:bg-green-500' : 'bg-indigo-600 hover:bg-indigo-500'} text-white`}
+                   >
+                     {copySuccess ? '✓ Copied to Clipboard' : 'Copy to Clipboard'}
+                   </button>
+                   <button 
+                     onClick={() => setExportData(null)} 
+                     className="bg-slate-600 hover:bg-slate-500 text-white px-5 py-2 rounded font-bold text-sm"
+                   >
+                     Close
+                   </button>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* --- NEW: Name Prompt Modal --- */}
+          {showNamePrompt && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/90 p-4 backdrop-blur-sm">
+              <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-teal-500/30 w-full max-w-sm flex flex-col items-center text-center transform animate-in zoom-in duration-300">
+                <div className="w-16 h-16 bg-teal-500/20 rounded-full flex items-center justify-center mb-4 border border-teal-400/50 shadow-[0_0_20px_rgba(20,184,166,0.3)]">
+                  <span className="text-3xl">🏆</span>
+                </div>
+                <h2 className="text-2xl font-black text-white tracking-wide mb-2">Welcome to Tangram</h2>
+                <p className="text-slate-300 text-sm mb-6">Enter a display name to save your progress and join the global leaderboard!</p>
+                <input
+                  type="text"
+                  placeholder="Your Player Name..."
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  maxLength={15}
+                  className="w-full bg-slate-900 border border-slate-600 text-white font-bold px-4 py-3 rounded-lg focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 mb-4 text-center placeholder:font-normal"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveName}
+                  disabled={!nameInput.trim()}
+                  className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors shadow-lg"
+                >
+                  Start Playing
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* --- NEW: Leaderboard Modal --- */}
+          {showLeaderboard && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm" onClick={() => setShowLeaderboard(false)}>
+              <div className="bg-slate-800 p-0 rounded-2xl shadow-2xl border border-yellow-500/30 w-full max-w-md flex flex-col transform animate-in slide-in-from-bottom-8 duration-300 overflow-hidden max-h-[80vh]" onClick={e => e.stopPropagation()}>
+                <div className="bg-slate-900 p-5 border-b border-slate-700 flex justify-between items-center sticky top-0">
+                  <h2 className="text-xl font-black text-yellow-400 tracking-wider flex items-center gap-2">
+                    <span>🏆</span> GLOBAL LEADERBOARD
+                  </h2>
+                  <button onClick={() => setShowLeaderboard(false)} className="text-slate-400 hover:text-white font-bold text-2xl leading-none">&times;</button>
+                </div>
+                
+                <div className="overflow-y-auto flex-1 p-2 bg-slate-800/50">
+                  {leaderboardData.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 font-medium">Loading scores...</div>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {leaderboardData.map((player, index) => (
+                        <div key={player.id} className={`flex items-center justify-between p-3 rounded-lg ${player.id === user?.uid ? 'bg-teal-900/30 border border-teal-500/30 shadow-inner' : 'hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center gap-4">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-md border ${index === 0 ? 'bg-yellow-400 text-yellow-900 border-yellow-300' : index === 1 ? 'bg-slate-300 text-slate-800 border-slate-200' : index === 2 ? 'bg-amber-600 text-amber-100 border-amber-500' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
+                              {index + 1}
+                            </div>
+                            <span className={`font-bold ${player.id === user?.uid ? 'text-teal-300' : 'text-slate-200'}`}>
+                              {player.displayName} {player.id === user?.uid && <span className="text-xs font-normal opacity-70 ml-1">(You)</span>}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <span className="font-black text-xl text-white leading-none tracking-wide">{player.solvedCount || 0}</span>
+                            <span className="text-[9px] text-slate-400 uppercase tracking-widest font-bold">Solved</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="bg-slate-900 p-4 border-t border-slate-700 text-center text-sm text-slate-300">
+                  You have solved <span className="font-bold text-teal-400 px-1">{solvedLevels.length}</span> out of {Object.keys(processedLevels).length} puzzles!
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <div className="w-full text-center pt-6 pb-12 sm:pb-8 text-slate-500 text-[13px] tracking-wide z-10 relative mt-auto">
+            Created by <span className="font-semibold text-slate-400">Raed Shorrosh</span> • <a href="mailto:shorrosh@gmail.com" className="hover:text-teal-400 transition-colors">shorrosh@gmail.com</a>
+          </div>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
