@@ -540,7 +540,7 @@
       canvasB.width = w; canvasB.height = h;
 
       const ctxA = canvasA.getContext('2d', { willReadFrequently: true });
-      const ctxB = canvasB.getContext('2d');
+      const ctxB = canvasB.getContext('2d', { willReadFrequently: true });
 
       const drawOffsetX = minX - pad;
       const drawOffsetY = minY - pad;
@@ -555,6 +555,29 @@
         ctx.fill();
       };
 
+      // --- 1. NEW OVERLAP DETECTION (Additive Blending) ---
+      ctxB.globalCompositeOperation = 'lighter';
+      ctxB.fillStyle = 'rgb(100, 0, 0)'; // Draw pieces in dark red
+      currentPieces.forEach(p => drawPoly(ctxB, getVertices(p)));
+
+      const imgDataB = ctxB.getImageData(0, 0, w, h);
+      const dataB = imgDataB.data;
+      let overlapPixels = 0;
+      
+      // If pieces overlap, their Red values add up (100 + 100 = 200). 
+      // Safe edges are ~50-100. Overlaps are > 150.
+      for (let i = 0; i < dataB.length; i += 4) {
+        if (dataB[i] > 150) overlapPixels++;
+      }
+      
+      // If there are more than 100 pixels of pure overlap, instantly reject the win!
+      if (overlapPixels > 100) return false;
+
+      // --- 2. SILHOUETTE MATCH (XOR) ---
+      // Clear the overlap test to run the standard silhouette test
+      ctxB.globalCompositeOperation = 'source-over';
+      ctxB.clearRect(0, 0, w, h);
+      
       ctxA.fillStyle = 'black';
       targetPieces.forEach(p => drawPoly(ctxA, getVertices(p)));
 
@@ -564,11 +587,11 @@
       ctxA.globalCompositeOperation = 'xor';
       ctxA.drawImage(canvasB, 0, 0);
 
-      const imgData = ctxA.getImageData(0, 0, w, h);
-      const data = imgData.data;
+      const imgDataA = ctxA.getImageData(0, 0, w, h);
+      const dataA = imgDataA.data;
       let errorPixels = 0;
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] > 128) errorPixels++;
+      for (let i = 3; i < dataA.length; i += 4) {
+        if (dataA[i] > 128) errorPixels++;
       }
 
       return errorPixels < 500;
@@ -616,12 +639,20 @@
         // Fetch current user's save data
         const userDocRef = doc(leaderboardRef, user.uid);
         getDoc(userDocRef).then((docSnap) => {
-          if (docSnap.exists()) {
+          if (docSnap.exists() && docSnap.data().displayName && docSnap.data().displayName !== "Anonymous Player") {
             const data = docSnap.data();
-            setDisplayName(data.displayName || "Player");
+            setDisplayName(data.displayName);
             setSolvedLevels(data.solvedLevels || []);
           } else {
-            setShowNamePrompt(true); // New user! Ask for name.
+            // Try to load offline progress
+            const localScores = localStorage.getItem('tangram_local_scores');
+            if (localScores) {
+              try { setSolvedLevels(JSON.parse(localScores)); } catch (e) {}
+            }
+            // Show prompt if not skipped
+            if (localStorage.getItem('tangram_skip_name') !== 'true') {
+              setShowNamePrompt(true);
+            }
           }
         });
 
@@ -647,6 +678,7 @@
         const finalName = nameInput.trim();
         setDisplayName(finalName);
         setShowNamePrompt(false);
+        localStorage.removeItem('tangram_skip_name'); // Clear skip flag if they change their mind
 
         const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
         await setDoc(userDocRef, {
@@ -976,18 +1008,23 @@
           if (checkWinConditionCanvas(pieces, activeSilhouetteData)) {
             setHasWon(true);
 
-            // --- NEW: Record Win to Cloud Database ---
-            if (user && !solvedLevels.includes(activeLevel)) {
+            // --- NEW: Record Win to Cloud Database or Locally ---
+            if (!solvedLevels.includes(activeLevel)) {
               const newSolved = [...solvedLevels, activeLevel];
               setSolvedLevels(newSolved); // Update local UI immediately
               
-              // Push save to cloud
-              const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
-              setDoc(userDocRef, {
-                displayName: displayName || "Anonymous Player",
-                solvedCount: newSolved.length,
-                solvedLevels: newSolved
-              }, { merge: true });
+              if (user && displayName) {
+                // Push save to cloud only if participating
+                const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+                setDoc(userDocRef, {
+                  displayName: displayName,
+                  solvedCount: newSolved.length,
+                  solvedLevels: newSolved
+                }, { merge: true });
+              } else {
+                // Save locally so progress isn't lost if playing offline
+                localStorage.setItem('tangram_local_scores', JSON.stringify(newSolved));
+              }
             }
           }
         }
@@ -1000,6 +1037,10 @@
         }
         return `Puzzle ${key.replace('level', '')}`;
       };
+
+      // --- NEW: VIP GRANDMASTER STATUS ---
+      const totalLevels = Object.keys(processedLevels).length;
+      const isGrandmaster = solvedLevels.length >= totalLevels && totalLevels > 0;
 
       return (
         <div className="min-h-screen bg-slate-800 text-slate-100 flex flex-col font-sans selection:bg-transparent relative">
@@ -1030,7 +1071,7 @@
                     <div className="absolute top-full mt-2 left-0 w-[280px] sm:w-[500px] bg-slate-800 border border-slate-600 shadow-2xl rounded-lg z-50 max-h-[60vh] overflow-y-auto p-4 flex flex-col">
                       <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3 px-1 flex justify-between">
                         <span>Select Puzzle</span>
-                        <span className="text-teal-400">({Object.keys(processedLevels).length} Levels)</span>
+                        <span className="text-teal-400">({totalLevels} Levels)</span>
                       </h3>
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
                         {Object.keys(processedLevels).map((levelKey, idx) => (
@@ -1074,13 +1115,17 @@
                 </button>
               </div>
 
-              {/* --- NEW: Trophy / Leaderboard Button --- */}
+              {/* --- UPDATED: Grandmaster Trophy Button --- */}
               <button
                 onClick={() => setShowLeaderboard(true)}
-                className="flex items-center justify-center bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-3 py-1.5 rounded-md text-sm font-bold transition-colors shadow-sm"
+                className={`flex items-center justify-center px-3 py-1.5 rounded-md text-sm font-bold transition-all shadow-sm ${
+                  isGrandmaster 
+                    ? 'bg-gradient-to-r from-yellow-600/30 to-amber-500/30 text-yellow-300 border border-yellow-400/60 shadow-[0_0_15px_rgba(250,204,21,0.3)] animate-pulse' 
+                    : 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                }`}
                 title="Global Leaderboard"
               >
-                🏆 {solvedLevels.length} / {Object.keys(processedLevels).length}
+                {isGrandmaster ? '👑 GRANDMASTER' : `🏆 ${solvedLevels.length} / ${totalLevels}`}
               </button>
 
               <button 
@@ -1152,10 +1197,10 @@
 
               {hasWon && (
                 <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 pointer-events-auto">
-                  <div className="bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl border border-teal-500/50 flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500">
+                  <div className={`bg-slate-800/95 backdrop-blur-md px-4 py-3 md:px-6 md:py-4 rounded-2xl md:rounded-full shadow-2xl flex flex-row items-center justify-center gap-3 md:gap-6 transform animate-in slide-in-from-bottom-4 fade-in duration-500 border ${isGrandmaster ? 'border-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.2)]' : 'border-teal-500/50'}`}>
                     
-                    <h2 className="text-lg md:text-xl font-black text-teal-400 tracking-widest drop-shadow-md whitespace-nowrap">
-                      SOLVED!
+                    <h2 className={`text-lg md:text-xl font-black tracking-widest drop-shadow-md whitespace-nowrap ${isGrandmaster ? 'text-yellow-400 animate-pulse' : 'text-teal-400'}`}>
+                      {isGrandmaster ? '👑 GRANDMASTER! 👑' : 'SOLVED!'}
                     </h2>
 
                     <div className="flex gap-2">
@@ -1237,9 +1282,18 @@
                 <button
                   onClick={handleSaveName}
                   disabled={!nameInput.trim()}
-                  className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors shadow-lg"
+                  className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors shadow-lg mb-3"
                 >
                   Start Playing
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('tangram_skip_name', 'true');
+                    setShowNamePrompt(false);
+                  }}
+                  className="text-slate-400 hover:text-white text-sm font-medium transition-colors"
+                >
+                  Skip for now (Play offline)
                 </button>
               </div>
             </div>
@@ -1267,8 +1321,21 @@
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-md border ${index === 0 ? 'bg-yellow-400 text-yellow-900 border-yellow-300' : index === 1 ? 'bg-slate-300 text-slate-800 border-slate-200' : index === 2 ? 'bg-amber-600 text-amber-100 border-amber-500' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
                               {index + 1}
                             </div>
-                            <span className={`font-bold ${player.id === user?.uid ? 'text-teal-300' : 'text-slate-200'}`}>
-                              {player.displayName} {player.id === user?.uid && <span className="text-xs font-normal opacity-70 ml-1">(You)</span>}
+                            
+                            {/* --- UPDATED: Golden Leaderboard Names for Grandmasters --- */}
+                            <span className={`font-bold flex items-center flex-wrap gap-1.5 ${
+                              (player.solvedCount >= totalLevels)
+                                ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]' 
+                                : player.id === user?.uid ? 'text-teal-300' : 'text-slate-200'
+                            }`}>
+                              {(player.solvedCount >= totalLevels) && <span title="Grandmaster" className="text-2xl pb-1 drop-shadow-lg">👑</span>}
+                              <span className="truncate">{player.displayName}</span> 
+                              {player.id === user?.uid && <span className="text-xs font-normal opacity-70 ml-1 text-slate-400">(You)</span>}
+                              {(player.solvedCount >= totalLevels) && (
+                                <span className="text-[9px] bg-gradient-to-r from-yellow-600/40 to-amber-500/40 text-yellow-100 border border-yellow-400/50 px-2 py-0.5 rounded-full ml-1 uppercase tracking-widest font-black shadow-sm whitespace-nowrap">
+                                  All Solved
+                                </span>
+                              )}
                             </span>
                           </div>
                           <div className="flex flex-col items-end">
@@ -1281,8 +1348,22 @@
                   )}
                 </div>
                 
-                <div className="bg-slate-900 p-4 border-t border-slate-700 text-center text-sm text-slate-300">
-                  You have solved <span className="font-bold text-teal-400 px-1">{solvedLevels.length}</span> out of {Object.keys(processedLevels).length} puzzles!
+                <div className="bg-slate-900 p-4 border-t border-slate-700 text-center text-sm text-slate-300 flex flex-col items-center gap-2">
+                  <div>
+                    {isGrandmaster ? (
+                      <span className="font-bold text-yellow-400 tracking-wide">👑 You are a Tangram Grandmaster! 👑</span>
+                    ) : (
+                      <>You have solved <span className="font-bold text-teal-400 px-1">{solvedLevels.length}</span> out of {totalLevels} puzzles!</>
+                    )}
+                  </div>
+                  {!displayName && (
+                    <button 
+                      onClick={() => { setShowLeaderboard(false); setShowNamePrompt(true); }}
+                      className="mt-2 bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-1.5 px-4 rounded-md transition-colors text-xs shadow-md"
+                    >
+                      Enter Name to Join Leaderboard
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
