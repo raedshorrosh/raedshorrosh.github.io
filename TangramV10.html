@@ -540,7 +540,7 @@
       canvasB.width = w; canvasB.height = h;
 
       const ctxA = canvasA.getContext('2d', { willReadFrequently: true });
-      const ctxB = canvasB.getContext('2d', { willReadFrequently: true });
+      const ctxB = canvasB.getContext('2d');
 
       const drawOffsetX = minX - pad;
       const drawOffsetY = minY - pad;
@@ -555,29 +555,6 @@
         ctx.fill();
       };
 
-      // --- 1. NEW OVERLAP DETECTION (Additive Blending) ---
-      ctxB.globalCompositeOperation = 'lighter';
-      ctxB.fillStyle = 'rgb(100, 0, 0)'; // Draw pieces in dark red
-      currentPieces.forEach(p => drawPoly(ctxB, getVertices(p)));
-
-      const imgDataB = ctxB.getImageData(0, 0, w, h);
-      const dataB = imgDataB.data;
-      let overlapPixels = 0;
-      
-      // If pieces overlap, their Red values add up (100 + 100 = 200). 
-      // Safe edges are ~50-100. Overlaps are > 150.
-      for (let i = 0; i < dataB.length; i += 4) {
-        if (dataB[i] > 150) overlapPixels++;
-      }
-      
-      // If there are more than 100 pixels of pure overlap, instantly reject the win!
-      if (overlapPixels > 100) return false;
-
-      // --- 2. SILHOUETTE MATCH (XOR) ---
-      // Clear the overlap test to run the standard silhouette test
-      ctxB.globalCompositeOperation = 'source-over';
-      ctxB.clearRect(0, 0, w, h);
-      
       ctxA.fillStyle = 'black';
       targetPieces.forEach(p => drawPoly(ctxA, getVertices(p)));
 
@@ -587,11 +564,11 @@
       ctxA.globalCompositeOperation = 'xor';
       ctxA.drawImage(canvasB, 0, 0);
 
-      const imgDataA = ctxA.getImageData(0, 0, w, h);
-      const dataA = imgDataA.data;
+      const imgData = ctxA.getImageData(0, 0, w, h);
+      const data = imgData.data;
       let errorPixels = 0;
-      for (let i = 3; i < dataA.length; i += 4) {
-        if (dataA[i] > 128) errorPixels++;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 128) errorPixels++;
       }
 
       return errorPixels < 500;
@@ -1323,19 +1300,14 @@
                             </div>
                             
                             {/* --- UPDATED: Golden Leaderboard Names for Grandmasters --- */}
-                            <span className={`font-bold flex items-center flex-wrap gap-1.5 ${
+                            <span className={`font-bold flex items-center gap-1.5 ${
                               (player.solvedCount >= totalLevels)
                                 ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]' 
                                 : player.id === user?.uid ? 'text-teal-300' : 'text-slate-200'
                             }`}>
-                              {(player.solvedCount >= totalLevels) && <span title="Grandmaster" className="text-2xl pb-1 drop-shadow-lg">👑</span>}
-                              <span className="truncate">{player.displayName}</span> 
+                              {(player.solvedCount >= totalLevels) && <span title="Grandmaster" className="text-sm">👑</span>}
+                              {player.displayName} 
                               {player.id === user?.uid && <span className="text-xs font-normal opacity-70 ml-1 text-slate-400">(You)</span>}
-                              {(player.solvedCount >= totalLevels) && (
-                                <span className="text-[9px] bg-gradient-to-r from-yellow-600/40 to-amber-500/40 text-yellow-100 border border-yellow-400/50 px-2 py-0.5 rounded-full ml-1 uppercase tracking-widest font-black shadow-sm whitespace-nowrap">
-                                  All Solved
-                                </span>
-                              )}
                             </span>
                           </div>
                           <div className="flex flex-col items-end">
