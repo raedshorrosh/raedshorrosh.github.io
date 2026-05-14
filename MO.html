@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>דיאגרמת MO אינטראקטיבית</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --surface: #ffffff;
+            --background: #f8fafc;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --arrow-up: #3b82f6;
+            --arrow-down: #1e293b;
+            --orbital-line: #dc2626; /* Red like the image */
+            --dashed-line: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--background);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            color: var(--text-main);
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+            max-width: 900px;
+            width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .app-container {
+                grid-template-columns: 300px 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--surface);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border);
+        }
+
+        .control-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-main);
+        }
+
+        .control-group select {
+            width: 100%;
+            padding: 0.75rem;
+            font-size: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background-color: var(--background);
+            color: var(--text-main);
+            transition: border-color 0.2s;
+        }
+
+        .control-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            background-color: var(--primary);
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 1rem;
+        }
+
+        .btn:hover {
+            background-color: #1d4ed8;
+        }
+
+        .stats {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        /* Diagram Layout */
+        .diagram-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            padding: 1rem 0;
+            position: relative;
+            padding-left: 4rem; /* Adjusted for Hebrew axis text */
+        }
+
+        .energy-axis {
+            position: absolute;
+            left: 30px;
+            bottom: 2rem;
+            top: 4rem;
+            width: 2px;
+            background: var(--text-main);
+        }
+
+        .energy-axis::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 10px solid var(--text-main);
+        }
+
+        .energy-axis::after {
+            content: 'אנרגיה';
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--text-main);
+        }
+
+        .diagram-headers {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr 1fr;
+            text-align: center;
+            font-weight: bold;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            min-width: 450px;
+        }
+
+        .diagram-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr 1fr;
+            grid-template-rows: repeat(13, 55px);
+            gap: 5px;
+            min-width: 450px;
+            position: relative;
+        }
+
+        .grid-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            position: relative;
+            z-index: 10;
+        }
+
+        .level-label {
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            white-space: nowrap;
+            margin-top: 4px;
+        }
+
+        .orbital-group {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .orbital {
+            width: 35px;
+            height: 35px;
+            border-bottom: 3px solid var(--orbital-line);
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            font-size: 20px;
+            padding-bottom: 4px;
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border-radius: 4px 4px 0 0;
+        }
+
+        .orbital:hover {
+            background-color: #f1f5f9;
+        }
+
+        .arrow-up { color: var(--arrow-up); font-weight: bold; }
+        .arrow-down { color: var(--arrow-down); font-weight: bold; margin-left: -4px; }
+        
+        .empty-orbital {
+            opacity: 0.3;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>דיאגרמת אורביטלים מולקולריים</h1>
+        <p>אכלוס אלקטרונים אינטראקטיבי למולקולות הומו-גרעיניות (מחזורים 1 ו-2).</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Controls Panel -->
+        <div class="panel">
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.5rem;">
+                <em>לחץ על קווי האורביטלים כדי להוסיף או להסיר אלקטרונים.</em>
+            </p>
+
+            <div class="control-group">
+                <label>אלקטרונים שמוקמו:</label>
+                <div id="placedElectrons" style="font-size: 1.5rem; font-weight: bold; color: var(--primary);">0</div>
+            </div>
+            
+            <div class="control-group">
+                <label for="mixingToggle">סדר אנרגיית אורביטלים:</label>
+                <select id="mixingToggle" onchange="buildDiagram()">
+                    <option value="sp-mixing">עם ערבוב s-p (למשל, B₂, C₂, N₂)</option>
+                    <option value="normal">ללא ערבוב s-p (למשל, O₂, F₂, Ne₂)</option>
+                </select>
+            </div>
+
+            <button class="btn" onclick="buildDiagram()">אפס דיאגרמה</button>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <span>אלקטרונים באטום 1:</span>
+                    <span id="atom1Electrons" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>אלקטרונים באטום 2:</span>
+                    <span id="atom2Electrons" class="stat-value">0</span>
+                </div>
+                <div class="stat-item" style="border-top: 1px dashed var(--border); padding-top: 0.5rem; margin-top: 0.5rem;">
+                    <span>אלקטרונים במולקולה:</span>
+                    <span id="placedElectronsMid" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);" id="electronMatchStatus"></span>
+                </div>
+                <div class="stat-item" style="margin-top: 1rem;">
+                    <span>סדר קשר:</span>
+                    <span id="bondOrder" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>מגנטיות:</span>
+                    <span id="magnetism" class="stat-value">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Diagram Panel -->
+        <div class="panel">
+            <div class="diagram-wrapper" dir="ltr">
+                <div class="energy-axis"></div>
+                <div class="diagram-headers">
+                    <div>אטום 1</div>
+                    <div>מולקולה</div>
+                    <div>אטום 2</div>
+                </div>
+                <!-- SVG Overlay for lines -->
+                <div class="diagram-grid" id="diagram">
+                    <!-- Elements injected by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const orbitalConfigurations = {
+            'sp-mixing': [
+                { id: 'a1_2p', side: 'left', col: 1, row: 3, count: 3, label: '2p', type: 'ao' },
+                { id: 'a2_2p', side: 'right', col: 3, row: 3, count: 3, label: '2p', type: 'ao' },
+                { id: 'sigma2p_star', side: 'mid', col: 2, row: 1, count: 1, label: 'σ*<sub>2p</sub>', type: 'antibonding' },
+                { id: 'pi2p_star', side: 'mid', col: 2, row: 2, count: 2, label: 'π*<sub>2p</sub>', type: 'antibonding' },
+                { id: 'sigma2p', side: 'mid', col: 2, row: 4, count: 1, label: 'σ<sub>2p</sub>', type: 'bonding' },
+                { id: 'pi2p', side: 'mid', col: 2, row: 5, count: 2, label: 'π<sub>2p</sub>', type: 'bonding' },
+                
+                { id: 'sigma2s_star', side: 'mid', col: 2, row: 7, count: 1, label: 'σ*<sub>2s</sub>', type: 'antibonding' },
+                { id: 'a1_2s', side: 'left', col: 1, row: 8, count: 1, label: '2s', type: 'ao' },
+                { id: 'a2_2s', side: 'right', col: 3, row: 8, count: 1, label: '2s', type: 'ao' },
+                { id: 'sigma2s', side: 'mid', col: 2, row: 9, count: 1, label: 'σ<sub>2s</sub>', type: 'bonding' },
+                
+                { id: 'sigma1s_star', side: 'mid', col: 2, row: 11, count: 1, label: 'σ*<sub>1s</sub>', type: 'antibonding' },
+                { id: 'a1_1s', side: 'left', col: 1, row: 12, count: 1, label: '1s', type: 'ao' },
+                { id: 'a2_1s', side: 'right', col: 3, row: 12, count: 1, label: '1s', type: 'ao' },
+                { id: 'sigma1s', side: 'mid', col: 2, row: 13, count: 1, label: 'σ<sub>1s</sub>', type: 'bonding' }
+            ],
+            'normal': [
+                { id: 'a1_2p', side: 'left', col: 1, row: 3, count: 3, label: '2p', type: 'ao' },
+                { id: 'a2_2p', side: 'right', col: 3, row: 3, count: 3, label: '2p', type: 'ao' },
+                { id: 'sigma2p_star', side: 'mid', col: 2, row: 1, count: 1, label: 'σ*<sub>2p</sub>', type: 'antibonding' },
+                { id: 'pi2p_star', side: 'mid', col: 2, row: 2, count: 2, label: 'π*<sub>2p</sub>', type: 'antibonding' },
+                { id: 'pi2p', side: 'mid', col: 2, row: 4, count: 2, label: 'π<sub>2p</sub>', type: 'bonding' },
+                { id: 'sigma2p', side: 'mid', col: 2, row: 5, count: 1, label: 'σ<sub>2p</sub>', type: 'bonding' },
+                
+                { id: 'sigma2s_star', side: 'mid', col: 2, row: 7, count: 1, label: 'σ*<sub>2s</sub>', type: 'antibonding' },
+                { id: 'a1_2s', side: 'left', col: 1, row: 8, count: 1, label: '2s', type: 'ao' },
+                { id: 'a2_2s', side: 'right', col: 3, row: 8, count: 1, label: '2s', type: 'ao' },
+                { id: 'sigma2s', side: 'mid', col: 2, row: 9, count: 1, label: 'σ<sub>2s</sub>', type: 'bonding' },
+                
+                { id: 'sigma1s_star', side: 'mid', col: 2, row: 11, count: 1, label: 'σ*<sub>1s</sub>', type: 'antibonding' },
+                { id: 'a1_1s', side: 'left', col: 1, row: 12, count: 1, label: '1s', type: 'ao' },
+                { id: 'a2_1s', side: 'right', col: 3, row: 12, count: 1, label: '1s', type: 'ao' },
+                { id: 'sigma1s', side: 'mid', col: 2, row: 13, count: 1, label: 'σ<sub>1s</sub>', type: 'bonding' }
+            ]
+        };
+
+        const lineConnections = [
+            { from: 'a1_1s', to: ['sigma1s', 'sigma1s_star'] },
+            { from: 'a2_1s', to: ['sigma1s', 'sigma1s_star'] },
+            { from: 'a1_2s', to: ['sigma2s', 'sigma2s_star'] },
+            { from: 'a2_2s', to: ['sigma2s', 'sigma2s_star'] },
+            { from: 'a1_2p', to: ['sigma2p', 'pi2p', 'pi2p_star', 'sigma2p_star'] },
+            { from: 'a2_2p', to: ['sigma2p', 'pi2p', 'pi2p_star', 'sigma2p_star'] }
+        ];
+
+        let currentState = [];
+
+        function buildDiagram() {
+            const mixing = document.getElementById('mixingToggle').value;
+            const container = document.getElementById('diagram');
+            const order = orbitalConfigurations[mixing];
+            
+            container.innerHTML = '';
+            currentState = [];
+
+            // Add SVG for connecting lines
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.id = 'lines-svg';
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+            svg.style.zIndex = '0';
+            container.appendChild(svg);
+
+            // Build grid cells
+            order.forEach((level) => {
+                const cellDiv = document.createElement('div');
+                cellDiv.className = 'grid-cell';
+                cellDiv.style.gridColumn = level.col;
+                cellDiv.style.gridRow = level.row;
+                cellDiv.dataset.levelId = level.id;
+
+                const orbitalGroup = document.createElement('div');
+                orbitalGroup.className = 'orbital-group';
+
+                for (let i = 0; i < level.count; i++) {
+                    const stateObj = { level: level, electrons: 0 };
+                    currentState.push(stateObj);
+                    
+                    const orbitalDiv = document.createElement('div');
+                    orbitalDiv.className = 'orbital empty-orbital';
+                    orbitalDiv.dataset.stateIndex = currentState.length - 1;
+                    
+                    orbitalDiv.addEventListener('click', handleOrbitalClick);
+                    orbitalGroup.appendChild(orbitalDiv);
+                }
+
+                cellDiv.appendChild(orbitalGroup);
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'level-label';
+                labelDiv.innerHTML = level.label;
+                cellDiv.appendChild(labelDiv);
+
+                container.appendChild(cellDiv);
+            });
+
+            updateStats();
+            
+            // Draw lines after the DOM has been updated and positioned
+            requestAnimationFrame(drawConnectingLines);
+        }
+
+        function drawConnectingLines() {
+            const svg = document.getElementById('lines-svg');
+            const container = document.getElementById('diagram');
+            if (!svg || !container) return;
+            
+            svg.innerHTML = ''; 
+            const containerRect = container.getBoundingClientRect();
+
+            lineConnections.forEach(conn => {
+                const fromCell = container.querySelector(`[data-level-id="${conn.from}"] .orbital-group`);
+                if (!fromCell) return;
+                
+                const fromRect = fromCell.getBoundingClientRect();
+                let fromX, fromY;
+                
+                // Attach line to inner edge of AO
+                if (conn.from.startsWith('a1')) {
+                    fromX = fromRect.right - containerRect.left + 5;
+                } else {
+                    fromX = fromRect.left - containerRect.left - 5;
+                }
+                fromY = fromRect.bottom - containerRect.top - 2;
+
+                conn.to.forEach(toId => {
+                    const toCell = container.querySelector(`[data-level-id="${toId}"] .orbital-group`);
+                    if (!toCell) return;
+                    
+                    const toRect = toCell.getBoundingClientRect();
+                    let toX;
+                    
+                    // Attach line to nearest outer edge of MO
+                    if (conn.from.startsWith('a1')) {
+                        toX = toRect.left - containerRect.left - 5;
+                    } else {
+                        toX = toRect.right - containerRect.left + 5;
+                    }
+                    const toY = toRect.bottom - containerRect.top - 2;
+
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', fromX);
+                    line.setAttribute('y1', fromY);
+                    line.setAttribute('x2', toX);
+                    line.setAttribute('y2', toY);
+                    line.setAttribute('stroke', 'var(--dashed-line)');
+                    line.setAttribute('stroke-width', '1.5');
+                    line.setAttribute('stroke-dasharray', '5,5');
+                    svg.appendChild(line);
+                });
+            });
+        }
+
+        function handleOrbitalClick(e) {
+            const box = e.currentTarget;
+            const index = box.dataset.stateIndex;
+            let stateObj = currentState[index];
+            
+            // Cycle through 0 -> 1 -> 2 -> 0 electrons
+            stateObj.electrons = (stateObj.electrons + 1) % 3;
+            
+            // Update visual rendering of the orbital
+            if (stateObj.electrons === 0) {
+                box.innerHTML = '';
+                box.classList.add('empty-orbital');
+            } else if (stateObj.electrons === 1) {
+                box.innerHTML = '<span class="arrow-up">↑</span>';
+                box.classList.remove('empty-orbital');
+            } else {
+                box.innerHTML = '<span class="arrow-up">↑</span><span class="arrow-down">↓</span>';
+                box.classList.remove('empty-orbital');
+            }
+            
+            updateStats();
+        }
+
+        function updateStats() {
+            let atom1Total = 0;
+            let atom2Total = 0;
+            let midTotal = 0;
+            let bondingElectrons = 0;
+            let antibondingElectrons = 0;
+            let hasUnpaired = false;
+
+            currentState.forEach(obj => {
+                if (obj.level.side === 'left') atom1Total += obj.electrons;
+                if (obj.level.side === 'right') atom2Total += obj.electrons;
+                if (obj.level.side === 'mid') {
+                    midTotal += obj.electrons;
+                    if (obj.level.type === 'bonding') bondingElectrons += obj.electrons;
+                    if (obj.level.type === 'antibonding') antibondingElectrons += obj.electrons;
+                    if (obj.electrons === 1) hasUnpaired = true;
+                }
+            });
+
+            document.getElementById('atom1Electrons').innerText = atom1Total;
+            document.getElementById('atom2Electrons').innerText = atom2Total;
+            document.getElementById('placedElectronsMid').innerText = midTotal;
+            document.getElementById('placedElectrons').innerText = midTotal; // Update top big counter
+            
+            // Validation Feedback
+            const matchStatus = document.getElementById('electronMatchStatus');
+            if (atom1Total + atom2Total === 0 && midTotal === 0) {
+                matchStatus.innerText = "";
+            } else if (atom1Total + atom2Total === midTotal) {
+                matchStatus.innerText = "✓ מספרי האלקטרונים תואמים (שימור חומר)";
+                matchStatus.style.color = "green";
+            } else {
+                matchStatus.innerText = "⚠ כמות האלקטרונים בצדדים לא שווה לאמצע";
+                matchStatus.style.color = "var(--orbital-line)";
+            }
+            
+            const bondOrder = (bondingElectrons - antibondingElectrons) / 2;
+            document.getElementById('bondOrder').innerText = midTotal === 0 ? "0" : bondOrder;
+            
+            const magnetismEl = document.getElementById('magnetism');
+            if (midTotal === 0) {
+                magnetismEl.innerText = "-";
+                magnetismEl.style.color = "var(--text-muted)";
+            } else if (hasUnpaired) {
+                magnetismEl.innerText = "פראמגנטי";
+                magnetismEl.style.color = "var(--orbital-line)"; // Reddish
+            } else {
+                magnetismEl.innerText = "דיאמגנטי";
+                magnetismEl.style.color = "var(--primary)"; // Blueish
+            }
+        }
+
+        // Run on load
+        window.addEventListener('DOMContentLoaded', buildDiagram);
+        
+        // Redraw lines if window resizes to keep them attached perfectly
+        window.addEventListener('resize', drawConnectingLines);
+    </script>
+</body>
+</html>
