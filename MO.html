@@ -191,8 +191,9 @@
         .diagram-grid {
             display: grid;
             grid-template-columns: 1fr 1.5fr 1fr;
-            grid-template-rows: repeat(13, 55px);
-            gap: 5px;
+            /* Dynamically scales row height between 28px and 45px based on window height */
+            grid-template-rows: repeat(13, clamp(28px, 4.5vh, 45px));
+            gap: clamp(1px, 0.3vh, 3px);
             min-width: 450px;
             position: relative;
         }
@@ -208,10 +209,10 @@
 
         .level-label {
             font-weight: 600;
-            font-size: 0.85rem;
+            font-size: clamp(0.7rem, 1.5vh, 0.85rem);
             color: var(--text-main);
             white-space: nowrap;
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .orbital-group {
@@ -220,14 +221,15 @@
         }
 
         .orbital {
-            width: 35px;
-            height: 35px;
+            /* Dynamically scales orbital box based on window height */
+            width: clamp(24px, 3.5vh, 35px);
+            height: clamp(24px, 3.5vh, 35px);
             border-bottom: 3px solid var(--orbital-line);
             display: flex;
             justify-content: center;
             align-items: flex-end;
-            font-size: 20px;
-            padding-bottom: 4px;
+            font-size: clamp(14px, 2.2vh, 20px);
+            padding-bottom: 2px;
             position: relative;
             cursor: pointer;
             transition: background-color 0.2s;
